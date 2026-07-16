@@ -3480,6 +3480,23 @@ void DivEngine::nextBuf(float** in, float** out, int inChans, int outChans, unsi
   }
   oscSize=size;
 
+  // live master-output capture (MCP server/harnesses)
+  if (captureActive.load(std::memory_order_acquire)) {
+    if (captureAbort.load(std::memory_order_acquire)) {
+      captureActive.store(false,std::memory_order_release);
+    } else {
+      for (unsigned int i=0; i<size && capturePos<captureFrames; i++) {
+        for (int j=0; j<captureChans; j++) {
+          captureData[capturePos*captureChans+j]=(j<outChans && out[j]!=NULL)?out[j][i]:0.0f;
+        }
+        capturePos++;
+      }
+      if (capturePos>=captureFrames) {
+        captureActive.store(false,std::memory_order_release);
+      }
+    }
+  }
+
   // get per-chip peaks
   if (isRunning()) {
     float decay=2.f*size/got.rate;
@@ -3545,4 +3562,40 @@ void DivEngine::nextBuf(float** in, float** out, int inChans, int outChans, unsi
 
   // this is shown in the GUI as audio load
   processTime=std::chrono::duration_cast<std::chrono::nanoseconds>(ts_processEnd-ts_processBegin).count();
+}
+
+bool DivEngine::startAudioCapture(size_t frames) {
+  if (captureActive.load(std::memory_order_acquire)) return false;
+  double rate=got.rate<1?44100.0:got.rate;
+  if (frames<1 || frames>(size_t)(rate*120.0)) return false;
+  captureChans=got.outChans<1?2:got.outChans;
+  if (captureChans>DIV_MAX_OUTPUTS) captureChans=DIV_MAX_OUTPUTS;
+  captureData.assign(frames*captureChans,0.0f);
+  capturePos=0;
+  captureFrames=frames;
+  captureAbort.store(false,std::memory_order_release);
+  captureActive.store(true,std::memory_order_release);
+  return true;
+}
+
+bool DivEngine::isAudioCapturing() {
+  return captureActive.load(std::memory_order_acquire);
+}
+
+void DivEngine::abortAudioCapture() {
+  if (captureActive.load(std::memory_order_acquire)) {
+    captureAbort.store(true,std::memory_order_release);
+  }
+}
+
+std::vector<float> DivEngine::takeAudioCapture(int& chans, double& rate) {
+  std::vector<float> ret;
+  if (captureActive.load(std::memory_order_acquire)) return ret;
+  chans=captureChans;
+  rate=got.rate<1?44100.0:got.rate;
+  captureData.resize(capturePos*captureChans);
+  ret.swap(captureData);
+  capturePos=0;
+  captureFrames=0;
+  return ret;
 }

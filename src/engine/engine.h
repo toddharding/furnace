@@ -628,6 +628,17 @@ class DivEngine {
     int lastNBIns, lastNBOuts, lastNBSize;
     std::atomic<size_t> processTime;
 
+    // live master-output capture (used by the MCP server/harnesses).
+    // armed via startAudioCapture; nextBuf appends the master mix until the
+    // requested frame count is reached, then clears captureActive itself
+    // (the audio thread is the only writer of the false transition on
+    // completion). readers take the data only when capture is inactive.
+    std::atomic<bool> captureActive;
+    std::atomic<bool> captureAbort;
+    std::vector<float> captureData;
+    size_t capturePos, captureFrames;
+    int captureChans;
+
     float chipPeak[DIV_MAX_CHIPS][DIV_MAX_OUTPUTS];
 
     void runExportThread();
@@ -981,6 +992,22 @@ class DivEngine {
 
     // is exporting
     bool isExporting();
+
+    // arm a live capture of the master output. the audio thread fills the
+    // buffer as it mixes; poll isAudioCapturing() until false, then call
+    // takeAudioCapture(). fails if a capture is already active, if frames
+    // is 0, or if it exceeds two minutes at the current rate.
+    bool startAudioCapture(size_t frames);
+
+    // whether an armed capture is still filling.
+    bool isAudioCapturing();
+
+    // request an active capture stop at the next buffer boundary.
+    void abortAudioCapture();
+
+    // take the captured interleaved float data (call only when capture is
+    // inactive; returns empty otherwise). resets the capture state.
+    std::vector<float> takeAudioCapture(int& chans, double& rate);
 
     // get how many loops is left
     void getLoopsLeft(int& loops);
@@ -1500,6 +1527,11 @@ class DivEngine {
       lastNBOuts(0),
       lastNBSize(0),
       processTime(0),
+      captureActive(false),
+      captureAbort(false),
+      capturePos(0),
+      captureFrames(0),
+      captureChans(2),
       yrw801ROM(NULL),
       tg100ROM(NULL),
       mu5ROM(NULL) {
