@@ -74,6 +74,10 @@ struct sigaction termsa;
 
 #include "cli/cli.h"
 
+#ifdef HAVE_MCP
+#include "mcp/mcp.h"
+#endif
+
 #ifdef HAVE_GUI
 #include "gui/gui.h"
 #endif
@@ -85,6 +89,10 @@ FurnaceGUI g;
 #endif
 
 FurnaceCLI cli;
+
+#ifdef HAVE_MCP
+FurnaceMCP mcp;
+#endif
 
 String outName;
 String vgmOutName;
@@ -105,6 +113,12 @@ bool consoleMode=true;
 
 bool consoleNoStatus=false;
 bool consoleNoControls=false;
+
+#ifdef HAVE_MCP
+bool mcpStdio=false;
+bool mcpSelfTest=false;
+String mcpTcpAddr;
+#endif
 
 bool displayEngineFailError=false;
 bool displayLocaleFailError=false;
@@ -210,6 +224,27 @@ TAParamResult pConsole(String val) {
   consoleMode=true;
   return TA_PARAM_SUCCESS;
 }
+
+#ifdef HAVE_MCP
+TAParamResult pMCP(String val) {
+  mcpStdio=true;
+  return TA_PARAM_SUCCESS;
+}
+
+TAParamResult pMCPTcp(String val) {
+  if (val.find(':')==String::npos) {
+    logE("invalid MCP TCP address! must be host:port, e.g. 127.0.0.1:0");
+    return TA_PARAM_ERROR;
+  }
+  mcpTcpAddr=val;
+  return TA_PARAM_SUCCESS;
+}
+
+TAParamResult pMCPSelfTest(String val) {
+  mcpSelfTest=true;
+  return TA_PARAM_SUCCESS;
+}
+#endif
 
 TAParamResult pQuiet(String val) {
   noReportError=true;
@@ -648,6 +683,11 @@ void initParams() {
   params.push_back(TAParam("v","view",true,pView,"pattern|commands|nothing","set visualization (nothing by default)"));
   params.push_back(TAParam("i","info",false,pInfo,"","get info about a song"));
   params.push_back(TAParam("c","console",false,pConsole,"","enable console mode"));
+#ifdef HAVE_MCP
+  params.push_back(TAParam("","mcp",false,pMCP,"","serve MCP (JSON-RPC 2.0) over standard input/output"));
+  params.push_back(TAParam("","mcp-tcp",true,pMCPTcp,"<host:port>","serve MCP (JSON-RPC 2.0) over TCP (port 0 picks a free port)"));
+  params.push_back(TAParam("","mcp-selftest",false,pMCPSelfTest,"","run the MCP in-process self-test and exit"));
+#endif
   params.push_back(TAParam("q","noreport",false,pQuiet,"","do not display message box on error"));
   params.push_back(TAParam("n","nostatus",false,pNoStatus,"","disable playback status in console mode"));
   params.push_back(TAParam("N","nocontrols",false,pNoControls,"","disable standard input controls in console mode"));
@@ -1162,6 +1202,29 @@ int main(int argc, char** argv) {
     finishLogFile();
     return 0;
   }
+
+#ifdef HAVE_MCP
+  if (mcpSelfTest) {
+    mcp.bindEngine(&e);
+    int result=mcp.selfTest();
+    e.quit();
+    finishLogFile();
+    return result;
+  }
+
+  if (mcpStdio || !mcpTcpAddr.empty()) {
+    mcp.bindEngine(&e);
+    bool mcpOK;
+    if (mcpStdio) {
+      mcpOK=mcp.serveStdio();
+    } else {
+      mcpOK=mcp.serveTcp(mcpTcpAddr);
+    }
+    e.quit();
+    finishLogFile();
+    return mcpOK?0:1;
+  }
+#endif
 
   if (consoleMode) {
     bool cliSuccess=false;

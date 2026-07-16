@@ -127,6 +127,7 @@ option(WITH_RENDER_DX11 "Whether to build with the DirectX 11 render backend." $
 option(WITH_RENDER_DX9 "Whether to build with the DirectX 9 render backend." ${WITH_RENDER_DX9_DEFAULT})
 option(WITH_RENDER_METAL "Whether to build with the Metal render backend." ${WITH_RENDER_METAL_DEFAULT})
 option(WITH_JSON "Whether to build with JSON export support." ON)
+option(WITH_MCP "Whether to build the MCP server (JSON-RPC 2.0 for AI-agent harnesses). Requires WITH_JSON." ON)
 option(USE_GLES "Use OpenGL ES for the OpenGL render backend." ${USE_GLES_DEFAULT})
 option(USE_FREETYPE "Use FreeType for font rendering." ON)
 option(SYSTEM_FFTW "Use a system-installed version of FFTW instead of the vendored one" OFF)
@@ -494,6 +495,16 @@ if (WITH_JSON)
   set(JSON_Install OFF CACHE INTERNAL "")
   add_subdirectory(extern/json)
   list(APPEND DEPENDENCIES_LIBRARIES nlohmann_json::nlohmann_json)
+endif()
+
+if (WITH_MCP)
+  if (NOT WITH_JSON)
+    message(FATAL_ERROR "WITH_MCP requires WITH_JSON.")
+  endif()
+  list(APPEND DEPENDENCIES_DEFINES HAVE_MCP)
+  if (WIN32)
+    list(APPEND DEPENDENCIES_LIBRARIES ws2_32)
+  endif()
 endif()
 
 set(AUDIO_SOURCES
@@ -952,6 +963,11 @@ set(CLI_SOURCES
 src/cli/cli.cpp
 )
 
+set(MCP_SOURCES
+src/mcp/mcp.cpp
+src/mcp/net.cpp
+)
+
 set(GUI_SOURCES
 extern/imgui_patched/imgui.cpp
 extern/imgui_patched/imgui_draw.cpp
@@ -1247,6 +1263,10 @@ if (WITH_LOCALE)
 endif()
 
 set(USED_SOURCES ${ENGINE_SOURCES} ${AUDIO_SOURCES} ${CLI_SOURCES} src/main.cpp)
+
+if (WITH_MCP)
+  list(APPEND USED_SOURCES ${MCP_SOURCES})
+endif()
 
 if (USE_BACKWARD)
   list(APPEND USED_SOURCES src/backtrace.cpp)
