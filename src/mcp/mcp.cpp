@@ -472,4 +472,10 @@ int FurnaceMCP::selfTest() {
 FurnaceMCP::FurnaceMCP():
   e(NULL) {
   registerCoreTools();
+  registerPatternTools(*this);
+  registerInstrumentTools(*this);
+  registerAssetTools(*this);
+  registerSongTools(*this);
+  registerRenderTools(*this);
+  registerObserveTools(*this);
 }

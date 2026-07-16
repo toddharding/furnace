@@ -966,6 +966,12 @@ src/cli/cli.cpp
 set(MCP_SOURCES
 src/mcp/mcp.cpp
 src/mcp/net.cpp
+src/mcp/tools_pattern.cpp
+src/mcp/tools_instrument.cpp
+src/mcp/tools_asset.cpp
+src/mcp/tools_song.cpp
+src/mcp/tools_render.cpp
+src/mcp/tools_observe.cpp
 )
 
 set(GUI_SOURCES

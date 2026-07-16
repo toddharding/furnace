@@ -50,6 +50,17 @@ struct FurnaceMCPTool {
     name(n), description(d), inputSchema(s), handler(h) {}
 };
 
+class FurnaceMCP;
+
+// per-domain tool registration (one translation unit each under src/mcp/).
+// each appends its domain's tools via FurnaceMCP::addTool.
+void registerPatternTools(FurnaceMCP& m);    // patterns, orders, grooves, speeds
+void registerInstrumentTools(FurnaceMCP& m); // instrument CRUD + JSON get/set/update
+void registerAssetTools(FurnaceMCP& m);      // wavetables + samples (incl. DSP ops)
+void registerSongTools(FurnaceMCP& m);       // metadata, subsongs, systems, channels, mixer, compat flags, config
+void registerRenderTools(FurnaceMCP& m);     // render_wav, export_vgm/rom/cmdstream/text
+void registerObserveTools(FurnaceMCP& m);    // channel states, registers, oscilloscopes, capture
+
 class FurnaceMCP {
   DivEngine* e;
   std::vector<FurnaceMCPTool> tools;
