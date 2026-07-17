@@ -127,6 +127,11 @@ agent-facing description; that listing is the authoritative surface.
   All OTHER tools marshal to the GUI frame boundary with a 30s budget — don't write
   new long-running tools without adding them to the long-tool set in
   `src/mcp/window.cpp`. Note `render_wav` still pauses live playback while rendering.
+  **Dispatch-swap phases must marshal back**: any long tool whose engine calls tear
+  down/rebuild dispatch cores (`saveAudio`, `finishAudioFile` — quitDispatch/
+  initDispatch) must wrap those phases in `furnaceMCPRunOnGUIOrInline` (mcp.h): the
+  GUI thread reads dispatch pointers mid-frame and racing it segfaults. render_wav
+  is the reference implementation.
 - Per-channel rendering runs the song once per channel — long multi-channel songs
   exceed `render_wav`'s timeout; use master-mode + per-channel solo renders (mutes).
 - `order_ops add` inserts after the CURRENT order (not at the end; `deep_clone_end`
