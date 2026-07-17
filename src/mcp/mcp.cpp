@@ -25,6 +25,10 @@
 
 using nlohmann::json;
 
+// GUI-thread marshal hook (see mcp.h). window.cpp installs the implementation
+// while the window server runs; everywhere else it stays NULL (= run inline).
+bool (*furnaceMCPGUIMarshal)(const std::function<void()>& fn)=NULL;
+
 #define MCP_PROTOCOL_VERSION "2024-11-05"
 
 // ---------------------------------------------------------------------------

@@ -40,6 +40,26 @@ class FurnaceGUI;
 // fix; no-op elsewhere). called by the serve loops and the self-test.
 void furnaceMCPFixupStdio();
 
+// window-mode hook: run a closure on the GUI thread at a frame boundary and
+// block until it completes (set by window.cpp while the window server runs;
+// NULL in headless builds/modes). returns false when the caller should just
+// run the closure inline (no server, or already on the GUI thread); throws if
+// the GUI thread cannot service it or the closure itself threw.
+//
+// long-running tools that stay on the net thread MUST route every phase that
+// tears down/rebuilds engine dispatch state (quitDispatch/initDispatch, audio
+// backend churn) through furnaceMCPRunOnGUIOrInline: the GUI thread reads
+// dispatch pointers mid-frame, and swapping cores under it crashes (observed
+// as a segfault on the second offline render_wav of a window session).
+extern bool (*furnaceMCPGUIMarshal)(const std::function<void()>& fn);
+
+inline void furnaceMCPRunOnGUIOrInline(const std::function<void()>& fn) {
+  if (furnaceMCPGUIMarshal!=NULL) {
+    if (furnaceMCPGUIMarshal(fn)) return;
+  }
+  fn();
+}
+
 // one MCP tool: name/description/JSON-Schema for tools/list, and a handler.
 // handlers return the tool's result payload (serialized as text content) and
 // signal tool-level failure by throwing std::runtime_error (reported as a

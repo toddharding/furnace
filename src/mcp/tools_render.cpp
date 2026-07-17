@@ -231,8 +231,17 @@ void registerRenderTools(FurnaceMCP& m) {
 
       String modeStr=mcpOptStr(args,"mode","one");
 
-      if (!e->saveAudio(path.c_str(),opts)) {
-        throw std::runtime_error(fmt::sprintf("could not start audio export: %s",e->getLastError()));
+      // saveAudio swaps dispatch cores (quitDispatch/initDispatch): in window
+      // mode that MUST happen on the GUI thread, which reads dispatch pointers
+      // mid-frame (racing it from the net thread crashes; see mcp.h).
+      bool started=false;
+      String startErr;
+      furnaceMCPRunOnGUIOrInline([&]() {
+        started=e->saveAudio(path.c_str(),opts);
+        if (!started) startErr=e->getLastError();
+      });
+      if (!started) {
+        throw std::runtime_error(fmt::sprintf("could not start audio export: %s",startErr));
       }
 
       // wait for the export thread to finish, polling isExporting() rather
@@ -250,15 +259,20 @@ void registerRenderTools(FurnaceMCP& m) {
       }
 
       if (timedOut) {
-        e->haltAudioFile(); // stops, joins the export thread and restores playback cores
+        // stops, joins the export thread and restores playback cores — another
+        // dispatch swap, so GUI thread again.
+        furnaceMCPRunOnGUIOrInline([&]() { e->haltAudioFile(); });
         throw std::runtime_error(fmt::sprintf("render_wav timed out after %dms and was aborted",timeoutMs));
       }
 
       // the export thread has already flagged itself done; join it and hand
       // playback cores back (mirrors what the GUI's render progress popup
-      // does once isExporting() goes false).
-      e->waitAudioFile();
-      e->finishAudioFile();
+      // does once isExporting() goes false). finishAudioFile swaps dispatch
+      // cores back — GUI thread, same as the start.
+      furnaceMCPRunOnGUIOrInline([&]() {
+        e->waitAudioFile();
+        e->finishAudioFile();
+      });
 
       json files=json::array();
       if (opts.mode==DIV_EXPORT_MODE_ONE) {

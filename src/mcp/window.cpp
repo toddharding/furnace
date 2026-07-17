@@ -610,6 +610,9 @@ void registerWindowTools(FurnaceMCP& m) {
 namespace {
   struct MCPPendingCall {
     json req;
+    // when set, this is a closure job (furnaceMCPGUIMarshal) instead of a
+    // JSON-RPC request; shared_ptr so a timed-out caller can't dangle it.
+    std::shared_ptr<std::function<void()>> fn;
     std::promise<json> prom;
   };
 
@@ -629,6 +632,10 @@ namespace {
   };
 
   MCPWinServer* g_win=NULL;
+
+  // the GUI (pump) thread id, recorded every pump so the marshal hook can
+  // detect "already on the GUI thread" and run inline instead of deadlocking.
+  std::atomic<std::thread::id> g_pumpThread{};
 
   // build a JSON-RPC error response object.
   json mcpRPCError(const json& id, int code, const String& message) {
@@ -652,6 +659,9 @@ namespace {
   // DivEngine - never GUI state - so they run directly on the net thread,
   // exactly as they would in headless mode. the client protocol is serial
   // (one line at a time), so nothing else runs concurrently while they do.
+  // phases that swap dispatch cores (render_wav's saveAudio/finishAudioFile)
+  // are the exception: they marshal themselves back to the GUI thread via
+  // furnaceMCPGUIMarshal, because the GUI reads dispatch pointers mid-frame.
   static bool mcpIsLongEngineTool(const json& req) {
     if (!req.is_object() || !req.contains("method") || req["method"]!="tools/call") return false;
     if (!req.contains("params") || !req["params"].is_object()) return false;
@@ -659,6 +669,32 @@ namespace {
     if (!p.contains("name") || !p["name"].is_string()) return false;
     String n=p["name"].get<String>();
     return n=="capture_audio" || n=="render_wav" || n=="export_rom";
+  }
+
+  // furnaceMCPGUIMarshal implementation: run a closure on the GUI thread via
+  // the same pending-call queue the JSON-RPC marshalling uses. used by long
+  // tools (render_wav) for their dispatch-swapping phases; see mcp.h.
+  bool mcpGUIMarshalImpl(const std::function<void()>& fn) {
+    MCPWinServer* w=g_win;
+    if (w==NULL) return false;
+    if (std::this_thread::get_id()==g_pumpThread.load()) return false; // already on GUI thread
+    MCPPendingCall* call=new MCPPendingCall();
+    call->fn=std::make_shared<std::function<void()>>(fn);
+    std::future<json> fut=call->prom.get_future();
+    {
+      std::lock_guard<std::mutex> lk(w->qMutex);
+      w->queue.push_back(call);
+      w->hasWork.store(true,std::memory_order_relaxed);
+    }
+    mcpWakeGUI();
+    if (fut.wait_for(std::chrono::seconds(60))!=std::future_status::ready) {
+      throw std::runtime_error("GUI thread did not service the engine-exclusive phase within 60s");
+    }
+    json r=fut.get();
+    if (r.is_object() && r.contains("__err")) {
+      throw std::runtime_error(r["__err"].get<String>());
+    }
+    return true;
   }
 
   // net-thread side: parse a line, marshal handleRequest to the GUI thread,
@@ -745,6 +781,7 @@ namespace {
 void furnaceMCPWindowPump() {
   MCPWinServer* w=g_win;
   if (w==NULL) return;
+  g_pumpThread.store(std::this_thread::get_id());
   if (!w->hasWork.load(std::memory_order_relaxed)) return;
 
   std::deque<MCPPendingCall*> local;
@@ -755,6 +792,16 @@ void furnaceMCPWindowPump() {
   }
   for (MCPPendingCall* call: local) {
     json resp;
+    if (call->fn) {
+      try {
+        (*call->fn)();
+      } catch (std::exception& ex) {
+        resp=json{{"__err",ex.what()}};
+      }
+      call->prom.set_value(resp);
+      delete call;
+      continue;
+    }
     try {
       resp=w->mcp->handleRequest(call->req);
     } catch (std::exception& ex) {
@@ -866,6 +913,7 @@ bool FurnaceMCP::serveWindow(const String& addr) {
     fflush(stdout);
   }
 
+  furnaceMCPGUIMarshal=mcpGUIMarshalImpl;
   w->netThread=std::thread(mcpNetThread,w);
   return true;
 }
@@ -873,6 +921,7 @@ bool FurnaceMCP::serveWindow(const String& addr) {
 void FurnaceMCP::stopWindow() {
   MCPWinServer* w=g_win;
   if (w==NULL) return;
+  furnaceMCPGUIMarshal=NULL;
   w->running.store(false);
 
   // unblock accept() and any in-flight recv().
@@ -884,8 +933,12 @@ void FurnaceMCP::stopWindow() {
   {
     std::lock_guard<std::mutex> lk(w->qMutex);
     for (MCPPendingCall* call: w->queue) {
-      json id=call->req.contains("id")?call->req["id"]:json(nullptr);
-      call->prom.set_value(mcpRPCError(id,-32001,"server shutting down"));
+      if (call->fn) {
+        call->prom.set_value(json{{"__err","server shutting down"}});
+      } else {
+        json id=call->req.contains("id")?call->req["id"]:json(nullptr);
+        call->prom.set_value(mcpRPCError(id,-32001,"server shutting down"));
+      }
       delete call;
     }
     w->queue.clear();
