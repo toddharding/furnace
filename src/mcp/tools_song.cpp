@@ -996,4 +996,77 @@ void registerSongTools(FurnaceMCP& m) {
       return json{{"ok",true}};
     }
   ));
+
+  // -------------------------------------------------------------------------
+  // checkpoints: headless undo. a checkpoint is a full in-memory .fur
+  // snapshot; restore loads it back. this is the headless counterpart of the
+  // GUI's undo stack (which lives in FurnaceGUI, not the engine).
+  static std::map<String,String>* checkpoints=new std::map<String,String>();
+
+  m.addTool(FurnaceMCPTool(
+    "checkpoint_save",
+    "Snapshot the full song state in memory (headless undo). Up to 16 named slots; restoring rolls everything back.",
+    json{{"type","object"},{"properties",{
+      {"slot",{{"type","string"},{"description","slot name (default \"default\")"}}}
+    }}},
+    [](FurnaceMCP& m, const json& args) -> json {
+      String slot=mcpOptStr(args,"slot","default");
+      if (checkpoints->find(slot)==checkpoints->end() && checkpoints->size()>=16) {
+        throw std::runtime_error("too many checkpoints (max 16) - drop one first");
+      }
+      SafeWriter* w=m.engine()->saveFur();
+      if (w==NULL) throw std::runtime_error("could not serialize song");
+      (*checkpoints)[slot]=String((const char*)w->getFinalBuf(),w->size());
+      w->finish();
+      delete w;
+      return json{{"ok",true},{"slot",slot},{"bytes",(int)(*checkpoints)[slot].size()}};
+    }
+  ));
+
+  m.addTool(FurnaceMCPTool(
+    "checkpoint_restore",
+    "Restore the song state saved in a checkpoint slot.",
+    json{{"type","object"},{"properties",{
+      {"slot",{{"type","string"},{"description","slot name (default \"default\")"}}}
+    }}},
+    [](FurnaceMCP& m, const json& args) -> json {
+      String slot=mcpOptStr(args,"slot","default");
+      auto it=checkpoints->find(slot);
+      if (it==checkpoints->end()) throw std::runtime_error(fmt::sprintf("no checkpoint named %s",slot));
+      const String& data=it->second;
+      // the engine takes ownership of the buffer on success
+      unsigned char* buf=new unsigned char[data.size()];
+      memcpy(buf,data.data(),data.size());
+      if (!m.engine()->load(buf,data.size(),"checkpoint.fur")) {
+        throw std::runtime_error(fmt::sprintf("restore failed: %s",m.engine()->getLastError()));
+      }
+      return json{{"ok",true},{"slot",slot}};
+    }
+  ));
+
+  m.addTool(FurnaceMCPTool(
+    "list_checkpoints",
+    "List saved checkpoint slots.",
+    json{{"type","object"},{"properties",json::object()}},
+    [](FurnaceMCP& m, const json& args) -> json {
+      json out=json::array();
+      for (auto& kv: *checkpoints) {
+        out.push_back(json{{"slot",kv.first},{"bytes",(int)kv.second.size()}});
+      }
+      return json{{"checkpoints",out}};
+    }
+  ));
+
+  m.addTool(FurnaceMCPTool(
+    "drop_checkpoint",
+    "Delete a checkpoint slot.",
+    json{{"type","object"},{"properties",{
+      {"slot",{{"type","string"}}}
+    }},{"required",json::array({"slot"})}},
+    [](FurnaceMCP& m, const json& args) -> json {
+      String slot=mcpArgStr(args,"slot");
+      if (checkpoints->erase(slot)==0) throw std::runtime_error(fmt::sprintf("no checkpoint named %s",slot));
+      return json{{"ok",true}};
+    }
+  ));
 }
