@@ -60,6 +60,13 @@
 - Synthesized single-cycle loops work great (BRR-friendly: loop length a
   multiple of 16, exact integer periods loop clean without crossfade; e.g.
   64-frame cycle at 16 kHz, `centerRate` 16744 puts C-4 at 261.6 Hz).
+- **`snes.r` (sustain rate) 0 = hold forever = "drony"** — looped-sample
+  voices sustain at level `s` until the next note. Set `r>0` for a natural
+  fade after sustain (measured: r=12 on a pad/choir ≈ −12 dB ~2 s after the
+  note; r=16 on a decaying bell ≈ −38 dB at 1 s). Long held notes under a
+  written crescendo then fade mid-swell — re-key the note halfway (reads as
+  a singer re-breathing). Verify decay with a solo render + 100 ms RMS
+  windows, not by eyeballing the envelope numbers.
 - Echo is the character of the chip: `18 01` enable buffer, `19 xx` delay
   (xx*16 ms of RAM!), `1C` feedback, `1A/1B` L/R echo volume, `30-37` an
   8-tap FIR (a decaying tap series = dark lowpassed cavern repeats), and
