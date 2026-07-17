@@ -730,4 +730,30 @@ void registerPatternTools(FurnaceMCP& m) {
       return json{{"subsong",ssIdx},{"channel",channel},{"effectCols",count}};
     }
   ));
+
+  m.addTool(FurnaceMCPTool(
+    "list_effects",
+    "Enumerate every pattern effect the given channel understands (what the Effect List window shows): code, hex, and description. Effects are chip- and channel-specific - always consult this before writing effect columns.",
+    nlohmann::json{{"type","object"},{"properties",{
+      {"channel",{{"type","integer"},{"description","channel whose effect vocabulary to list (default 0)"}}}
+    }}},
+    [](FurnaceMCP& m, const nlohmann::json& args) -> nlohmann::json {
+      DivEngine* e=m.engine();
+      int chan=mcpOptInt(args,"channel",0);
+      if (chan<0 || chan>=e->getTotalChannelCount()) throw std::runtime_error("channel out of range");
+      nlohmann::json effects=nlohmann::json::array();
+      for (int fx=0; fx<256; fx++) {
+        const char* desc=e->getEffectDesc((unsigned char)fx,chan,false);
+        if (desc==NULL) continue;
+        char hex[4];
+        snprintf(hex,sizeof(hex),"%02X",fx);
+        effects.push_back(nlohmann::json{
+          {"code",fx},
+          {"hex",hex},
+          {"description",desc}
+        });
+      }
+      return nlohmann::json{{"channel",chan},{"effects",effects}};
+    }
+  ));
 }

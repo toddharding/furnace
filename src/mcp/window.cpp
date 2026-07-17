@@ -647,6 +647,20 @@ namespace {
     SDL_PushEvent(&ev);
   }
 
+  // engine-only tools that can run far longer than the GUI marshalling budget
+  // (live capture, offline rendering). they touch only the self-locking
+  // DivEngine - never GUI state - so they run directly on the net thread,
+  // exactly as they would in headless mode. the client protocol is serial
+  // (one line at a time), so nothing else runs concurrently while they do.
+  static bool mcpIsLongEngineTool(const json& req) {
+    if (!req.is_object() || !req.contains("method") || req["method"]!="tools/call") return false;
+    if (!req.contains("params") || !req["params"].is_object()) return false;
+    const json& p=req["params"];
+    if (!p.contains("name") || !p["name"].is_string()) return false;
+    String n=p["name"].get<String>();
+    return n=="capture_audio" || n=="render_wav" || n=="export_rom";
+  }
+
   // net-thread side: parse a line, marshal handleRequest to the GUI thread,
   // wait for the result (with a timeout so a wedged GUI can't hang the socket),
   // and serialize the response. mirrors FurnaceMCP::handleLine, but off-thread.
@@ -657,6 +671,12 @@ namespace {
       req=json::parse(line);
     } catch (std::exception&) {
       return mcpRPCError(nullptr,-32700,"parse error").dump();
+    }
+
+    if (mcpIsLongEngineTool(req)) {
+      json resp=w->mcp->handleRequest(req);
+      if (resp.is_null()) return "";
+      return resp.dump();
     }
 
     MCPPendingCall* call=new MCPPendingCall();

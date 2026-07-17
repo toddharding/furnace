@@ -473,6 +473,16 @@ int FurnaceMCP::selfTest() {
   // notification produces no reply
   MCP_CHECK(handleLine("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}")=="","notification produces no reply");
 
+  // list_effects enumerates the channel's effect vocabulary (incl. vibrato)
+  resp=handleRequest(json{{"jsonrpc","2.0"},{"id",9},{"method","tools/call"},{"params",{{"name","list_effects"},{"arguments",json::object()}}}});
+  MCP_CHECK(!resp["result"].value("isError",false),"list_effects succeeds");
+  {
+    json fx=json::parse(resp["result"]["content"][0]["text"].get<String>());
+    bool hasVibrato=false;
+    for (auto& en: fx["effects"]) if (en["code"]==4) hasVibrato=true;
+    MCP_CHECK(fx["effects"].size()>8 && hasVibrato,"list_effects includes vibrato (04xy)");
+  }
+
   // bad tool args are a tool-level error, not a crash
   resp=handleRequest(json{{"jsonrpc","2.0"},{"id",8},{"method","tools/call"},{"params",{{"name","note_on"},{"arguments",{{"channel",99999},{"instrument",0},{"note",60}}}}}});
   MCP_CHECK(resp["result"].value("isError",false),"out-of-range channel is a tool error");
