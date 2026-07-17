@@ -46,6 +46,27 @@
 - PCM drums overpower OPM FM by ~10:1 at equal note volumes — balance with
   chip mixer volumes (e.g. FM 1.0 / PCM 0.35), then master ~1.5.
 
+## SNES (S-SMP/DSP)
+
+- 8 sample channels; instruments are type 29 with `amiga.useSample` +
+  `amiga.initSample` and the `snes` ADSR block (`a` 0-15, `d` 0-7, `s` 0-7,
+  `r` = sustain rate, 0 holds forever until key-off).
+- **The DSP voice sum clips internally** (16-bit accumulator, hardware-
+  authentic saturation) and the mixer master volume is applied AFTER that
+  clip — turning master down just scales the distortion. Keep voice volumes
+  around HALF the range (peaks ~55/127, pads ~30) so the 8-voice sum stays
+  inside headroom; verify with a flat-top count on the rendered wave (samples
+  pinned at ±peak), not just the peak value.
+- Synthesized single-cycle loops work great (BRR-friendly: loop length a
+  multiple of 16, exact integer periods loop clean without crossfade; e.g.
+  64-frame cycle at 16 kHz, `centerRate` 16744 puts C-4 at 261.6 Hz).
+- Echo is the character of the chip: `18 01` enable buffer, `19 xx` delay
+  (xx*16 ms of RAM!), `1C` feedback, `1A/1B` L/R echo volume, `30-37` an
+  8-tap FIR (a decaying tap series = dark lowpassed cavern repeats), and
+  `12 01` per channel to opt in. Echo RAM comes out of the 64 KB sample
+  budget — size samples accordingly.
+- Hardware noise per channel: `11 01` toggle + `1D xx` frequency (0-1F).
+
 ## Instrument JSON contract (all chips)
 
 - Keys must match `saveJSON` exactly: `fm.operators` (array; `fm.ops` is the
