@@ -145,5 +145,10 @@ agent-facing description; that listing is the authoritative surface.
   descriptions — consult it before writing effect columns (effects are chip- and
   channel-specific). `export_text` without separatePatterns is an upstream stub.
 - Volume column ranges differ per chip (OPM/2612/PCM 0-127, OPL 0-63, SN 0-15).
+- **Channel indexing**: MCP tools take 0-based channel indices; the GUI (and
+  therefore the user) shows 1-based names ("Channel 3" = MCP channel 2), and
+  per-channel render files are 1-based too (`_c03.wav` = MCP channel 2). When
+  a user names a channel, translate and confirm which part it is before
+  editing — editing the neighbor by off-by-one is a real, observed failure.
 - For composing music (chip choice, tempo/groove math, arrangement craft, the
   stems/spectrogram verification loop), use the **compose-chiptune-over-mcp** skill.

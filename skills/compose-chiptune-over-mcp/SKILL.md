@@ -37,8 +37,10 @@ its lesson the hard way.
 
 On a scratch headless instance: import every instrument, place one note per
 (instrument, intended channel), `render_wav` per_channel, assert every stem
-peaks. This catches type mismatches, 4-op channel traps, and dead-quiet
-patches in 30 seconds instead of after a full arrangement exists.
+peaks — **and that every stem decays** (render past the note, assert the tail
+falls; a flat tail = infinite sustain, see Envelope discipline). This catches
+type mismatches, 4-op channel traps, dead-quiet patches, and born-drony
+envelopes in 30 seconds instead of after a full arrangement exists.
 Also **level-audition** competing patches (same note, same volume, measure
 stem peaks) — library patches vary >10x in baked-in loudness; pick by number,
 then let the user judge character.
@@ -62,6 +64,34 @@ then let the user judge character.
   intro on repeat).
 - Panning `08xy` at row 0 per order: split stab/comp voices L/R, keep
   bass/lead/drums center.
+
+## Envelope discipline (design the whole lifecycle, not just the attack)
+
+Every instrument needs an answer to four questions BEFORE it goes in a
+pattern: how it starts (attack), how it settles (decay → sustain level),
+**what happens while a note is held** (fade after sustain — the one everyone
+forgets), and how it ends on key-off (release). An envelope that holds its
+sustain forever is a *drone by construction*: the note never dies, tails pile
+up under everything, and the listener hears "drony" even with perfect
+note-OFF hygiene. Infinite sustain is a deliberate choice for an explicit
+drone/bed part — never a default.
+
+- Where the fade-after-sustain knob lives: **SNES** `snes.r` (sustain rate;
+  0 = hold forever; ~12 ≈ −12 dB ~2 s on a pad/choir, ~16 fast bell fade);
+  **FM (OPM/OPN2/OPL)** carrier `d2r`/`sl` (secondary decay after reaching
+  sustain) + `rr` for key-off; **GB** envelope length/direction; **PSG-class**
+  a volume macro with decay steps (and `"length"` set, or it silently never
+  applies).
+- Role targets: leads/choirs fade through −12 dB in ~1.5-2.5 s (phrases
+  connect, holds still breathe); bells/stabs die fast and let echo/reverb
+  carry the tail; background pads may fade slower but must *move*; only
+  scored drone parts hold flat.
+- **Measure, don't trust the numbers**: solo-render a section, take 100 ms
+  RMS windows after a note, and read the dB timeline (−12 dB when? −40 dB
+  when?). Envelope fields lie across chips; the render doesn't.
+- Interaction trap: a long held note under a written crescendo (volume-column
+  swell) now fades underneath the swell — re-key the note mid-hold (reads as
+  a singer re-breathing) or shorten the hold.
 
 ## Verify (the perception loop)
 
@@ -96,7 +126,12 @@ and evidence disagree, run the next experiment, not the next theory.
 ## Translating listener complaints
 
 "Harsh/saw-like" → patch character or maxed volume: level-audition
-replacements. "Silent" → debug ladder. "Drones/discordant" → OFF hygiene.
+replacements. "Silent" → debug ladder. "Drones/discordant" → OFF hygiene
+first; if OFFs are already clean, it's the envelope holding sustain forever
+(see Envelope discipline) — fix the instrument, not the pattern.
 "Cheesy" → variation + harmony + vibrato depth. "Sounds twice/doubled" → a
 second instance is playing audibly (see Session shape). "Too sparse drums" →
 density (lock kick to the bass gallop), not sample length.
+When a complaint names "channel N", the user means the GUI's 1-indexed
+column — MCP channel N-1. Confirm the mapping by naming the part back
+("channel 3 — the high pad?") before editing anything.
