@@ -76,12 +76,17 @@ up under everything, and the listener hears "drony" even with perfect
 note-OFF hygiene. Infinite sustain is a deliberate choice for an explicit
 drone/bed part — never a default.
 
-- Where the fade-after-sustain knob lives: **SNES** `snes.r` (sustain rate;
-  0 = hold forever; ~12 ≈ −12 dB ~2 s on a pad/choir, ~16 fast bell fade);
-  **FM (OPM/OPN2/OPL)** carrier `d2r`/`sl` (secondary decay after reaching
-  sustain) + `rr` for key-off; **GB** envelope length/direction; **PSG-class**
-  a volume macro with decay steps (and `"length"` set, or it silently never
-  applies).
+- Envelope fields are **chip-specific in name, range, AND semantics** — read
+  `describe_instrument_schema {type}` plus the chip's section in
+  `references/chip-gotchas.md` before setting anything; don't carry one
+  chip's ranges to another. Known fade-after-sustain knobs: **SNES** `snes.r`
+  (sustain rate 0-31; 0 = hold forever; ~12 ≈ −12 dB ~2 s on a pad/choir,
+  ~16 fast bell fade); **FM (OPM/OPN2/OPL)** carrier `d2r`/`sl` (secondary
+  decay after reaching sustain) + `rr` for key-off; **GB** envelope
+  length/direction; **PSG-class** a volume macro with decay steps (and
+  `"length"` set, or it silently never applies). The near-universal invariant:
+  a zeroed fade/release-class field means "hold forever" — but confirm per
+  chip by measurement, not by analogy.
 - Role targets: leads/choirs fade through −12 dB in ~1.5-2.5 s (phrases
   connect, holds still breathe); bells/stabs die fast and let echo/reverb
   carry the tail; background pads may fade slower but must *move*; only
@@ -132,6 +137,7 @@ first; if OFFs are already clean, it's the envelope holding sustain forever
 "Cheesy" → variation + harmony + vibrato depth. "Sounds twice/doubled" → a
 second instance is playing audibly (see Session shape). "Too sparse drums" →
 density (lock kick to the bass gallop), not sample length.
-When a complaint names "channel N", the user means the GUI's 1-indexed
-column — MCP channel N-1. Confirm the mapping by naming the part back
-("channel 3 — the high pad?") before editing anything.
+When a complaint names a channel ("channel 3", "FM 8"), that's a GUI display
+name and the naming scheme is chip-specific — resolve it via `get_channels`
+(name/abbrev → MCP `index`), then confirm the part back by role ("channel 3
+— the high pad?") before editing anything.
