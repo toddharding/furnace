@@ -333,6 +333,18 @@ void FurnaceMCP::bindEngine(DivEngine* eng) {
   e=eng;
 }
 
+#ifdef HAVE_GUI
+void FurnaceMCP::bindGUI(FurnaceGUI* g) {
+  gui=g;
+  // register the window-only tools exactly once, only when a GUI is bound,
+  // so headless transports never surface them in tools/list.
+  if (g!=NULL && !windowToolsRegistered) {
+    registerWindowTools(*this);
+    windowToolsRegistered=true;
+  }
+}
+#endif
+
 json FurnaceMCP::handleRequest(const json& req) {
   json id=nullptr;
   if (req.contains("id")) id=req["id"];
@@ -470,7 +482,12 @@ int FurnaceMCP::selfTest() {
 }
 
 FurnaceMCP::FurnaceMCP():
-  e(NULL) {
+  e(NULL)
+#ifdef HAVE_GUI
+  , gui(NULL)
+  , windowToolsRegistered(false)
+#endif
+{
   registerCoreTools();
   registerPatternTools(*this);
   registerInstrumentTools(*this);

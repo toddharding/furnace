@@ -3419,6 +3419,34 @@ class FurnaceGUI {
     bool finish(bool saveConfig=false);
     bool init();
     bool requestQuit();
+#ifdef HAVE_MCP
+    // --- MCP window-mode accessors (implemented in src/mcp/window.cpp) ---
+    // all of these run on the GUI thread via the marshalling pump, so they may
+    // touch GUI/engine state directly.
+    bool* mcpWindowOpenFlag(int guiWindow); // NULL for windows with no exposed toggle
+    bool mcpGetWindowOpen(int guiWindow);
+    void mcpSetWindowOpen(int guiWindow, bool open); // focuses via nextWindow when opening
+    void mcpGetCursor(int& order, int& xCoarse, int& xFine, int& y);
+    void mcpSetCursor(int order, int xCoarse, int xFine, int y);
+    void mcpGetSelection(int& sOrder, int& sX, int& sF, int& sY, int& eOrder, int& eX, int& eF, int& eY);
+    void mcpSetSelection(int sOrder, int sX, int sF, int sY, int eOrder, int eX, int eF, int eY);
+    int mcpGetOctave();
+    void mcpSetOctave(int v);
+    int mcpGetEditStep();
+    void mcpSetEditStep(int v);
+    bool mcpGetFollowOrders();
+    void mcpSetFollowOrders(bool v);
+    bool mcpGetFollowPattern();
+    void mcpSetFollowPattern(bool v);
+    bool mcpGetPolyInput();
+    void mcpSetPolyInput(bool v);
+    void mcpDoActionIndex(int what);
+    void mcpDoUndo();
+    void mcpDoRedo();
+    SDL_Window* mcpGetWindow();
+    int mcpGetRenderBackendId();
+    const char* mcpGetRenderBackendName();
+#endif
     FurnaceGUI();
 };
 

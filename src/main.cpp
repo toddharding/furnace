@@ -118,6 +118,7 @@ bool consoleNoControls=false;
 bool mcpStdio=false;
 bool mcpSelfTest=false;
 String mcpTcpAddr;
+String mcpWindowAddr;
 #endif
 
 bool displayEngineFailError=false;
@@ -243,6 +244,20 @@ TAParamResult pMCPTcp(String val) {
 TAParamResult pMCPSelfTest(String val) {
   mcpSelfTest=true;
   return TA_PARAM_SUCCESS;
+}
+
+TAParamResult pMCPWindow(String val) {
+#ifndef HAVE_GUI
+  logE("Furnace was compiled without the GUI; --mcp-window is unavailable.");
+  return TA_PARAM_ERROR;
+#else
+  if (val.find(':')==String::npos) {
+    logE("invalid MCP window address! must be host:port, e.g. 127.0.0.1:0");
+    return TA_PARAM_ERROR;
+  }
+  mcpWindowAddr=val;
+  return TA_PARAM_SUCCESS;
+#endif
 }
 #endif
 
@@ -687,6 +702,7 @@ void initParams() {
   params.push_back(TAParam("","mcp",false,pMCP,"","serve MCP (JSON-RPC 2.0) over standard input/output"));
   params.push_back(TAParam("","mcp-tcp",true,pMCPTcp,"<host:port>","serve MCP (JSON-RPC 2.0) over TCP (port 0 picks a free port)"));
   params.push_back(TAParam("","mcp-selftest",false,pMCPSelfTest,"","run the MCP in-process self-test and exit"));
+  params.push_back(TAParam("","mcp-window",true,pMCPWindow,"<host:port>","run the GUI and serve MCP over TCP against the live window (port 0 picks a free port)"));
 #endif
   params.push_back(TAParam("q","noreport",false,pQuiet,"","do not display message box on error"));
   params.push_back(TAParam("n","nostatus",false,pNoStatus,"","disable playback status in console mode"));
@@ -1306,8 +1322,25 @@ int main(int argc, char** argv) {
   sigaction(SIGTERM,&termsa,NULL);
 #endif
 
+#ifdef HAVE_MCP
+  // window mode: serve MCP over TCP against the live GUI. requests are
+  // marshalled to the GUI thread by the frame-boundary pump in g.loop().
+  if (!mcpWindowAddr.empty()) {
+    mcp.bindEngine(&e);
+    mcp.bindGUI(&g);
+    if (!mcp.serveWindow(mcpWindowAddr)) {
+      logE("could not start MCP window server on %s!",mcpWindowAddr.c_str());
+    } else {
+      logI("MCP window server listening on %s",mcpWindowAddr.c_str());
+    }
+  }
+#endif
+
   g.loop();
   logI("closing GUI.");
+#ifdef HAVE_MCP
+  if (!mcpWindowAddr.empty()) mcp.stopWindow();
+#endif
   g.finish(true);
 #else
   logE("GUI requested but GUI not compiled!");

@@ -32,6 +32,9 @@
 #include "nlohmann/json.hpp"
 
 class FurnaceMCP;
+#ifdef HAVE_GUI
+class FurnaceGUI;
+#endif
 
 // rebind CRT stdio to the process's real std handles (Windows GUI-subsystem
 // fix; no-op elsewhere). called by the serve loops and the self-test.
@@ -61,10 +64,24 @@ void registerSongTools(FurnaceMCP& m);       // metadata, subsongs, systems, cha
 void registerRenderTools(FurnaceMCP& m);     // render_wav, export_vgm/rom/cmdstream/text
 void registerObserveTools(FurnaceMCP& m);    // channel states, registers, oscilloscopes, capture
 
+#ifdef HAVE_GUI
+// window-mode-only tools (screenshot, list/open/close windows, gui_action
+// dispatch, cursor/selection/edit-control get/set, undo/redo). registered
+// lazily by FurnaceMCP::bindGUI, so they never appear in headless tools/list.
+void registerWindowTools(FurnaceMCP& m);
+// GUI-thread pump: drain marshalled MCP calls at a frame boundary. cheap when
+// the queue is empty (a relaxed atomic check). no-op if no window server runs.
+void furnaceMCPWindowPump();
+#endif
+
 class FurnaceMCP {
   DivEngine* e;
   std::vector<FurnaceMCPTool> tools;
   void registerCoreTools();
+#ifdef HAVE_GUI
+  FurnaceGUI* gui;
+  bool windowToolsRegistered;
+#endif
 
   public:
     DivEngine* engine() { return e; }
@@ -72,6 +89,17 @@ class FurnaceMCP {
     void addTool(FurnaceMCPTool t);
 
     void bindEngine(DivEngine* eng);
+#ifdef HAVE_GUI
+    FurnaceGUI* getGUI() { return gui; }
+    // bind the live GUI and (once) register the window-only tools.
+    void bindGUI(FurnaceGUI* g);
+    // window mode: run the normal GUI while serving MCP over TCP. starts the
+    // listener thread (prints "furnace-mcp ready <addr>" once bound) and returns;
+    // each request is marshalled to the GUI thread via furnaceMCPWindowPump.
+    bool serveWindow(const String& addr);
+    // stop the window-mode serve thread cleanly (call after the GUI loop exits).
+    void stopWindow();
+#endif
 
     // handle one JSON-RPC 2.0 request object. returns the response object,
     // or a null json for notifications (no reply shall be sent).

@@ -4372,6 +4372,12 @@ bool FurnaceGUI::detectOutOfBoundsWindow(SDL_Rect& failing) {
   if (x) pendingLayoutImportReopen.push(&x); \
   x=false;
 
+#ifdef HAVE_MCP
+// drain any MCP calls marshalled from the window-mode serve thread. defined in
+// src/mcp/window.cpp; a cheap relaxed-atomic check when the queue is empty.
+extern void furnaceMCPWindowPump();
+#endif
+
 bool FurnaceGUI::loop() {
   DECLARE_METRIC(calcChanOsc)
   DECLARE_METRIC(mobileControls)
@@ -4441,6 +4447,10 @@ bool FurnaceGUI::loop() {
   }
 
   while (!quit) {
+#ifdef HAVE_MCP
+    // service marshalled MCP window-mode calls at the top of each frame.
+    furnaceMCPWindowPump();
+#endif
     SDL_Event ev;
     SelectionPoint prevCursor=cursor;
     if (e->isPlaying()) {

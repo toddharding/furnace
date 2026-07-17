@@ -974,6 +974,12 @@ src/mcp/tools_render.cpp
 src/mcp/tools_observe.cpp
 )
 
+# window mode (--mcp-window) drives the live GUI, so it is only built when both
+# the MCP server and the GUI are present.
+if (BUILD_GUI)
+  list(APPEND MCP_SOURCES src/mcp/window.cpp)
+endif()
+
 set(GUI_SOURCES
 extern/imgui_patched/imgui.cpp
 extern/imgui_patched/imgui_draw.cpp
