@@ -114,3 +114,28 @@ agent-facing description; that listing is the authoritative surface.
   `octave = value/12 - 5`.
 - `song_json` is the ground truth for every read-back dispute; parity with it is a
   contract every domain test asserts.
+
+## Operational rules (learned in production)
+
+- **Audible-review rule**: a headless instance's `play` + `capture_audio` outputs to
+  the REAL audio device — it doubles over whatever a live window instance is playing.
+  Silent verification always uses `render_wav` (offline). `capture_audio` belongs on
+  the live window instance only, where it records what is already audible.
+- **Window-mode marshalling budget is 30s**: long-running tools (`capture_audio`,
+  `render_wav`) block the GUI thread and time out in `--mcp-window` mode — run them on
+  a headless instance against the saved song instead. (Async dispatch for long tools
+  is a known follow-up in `src/mcp/window.cpp`.)
+- Per-channel rendering runs the song once per channel — long multi-channel songs
+  exceed `render_wav`'s timeout; use master-mode + per-channel solo renders (mutes).
+- `order_ops add` inserts after the CURRENT order (not at the end; `deep_clone_end`
+  appends). Verify with `read_orders`; `write_orders` with a full matrix is safest.
+- `write_pattern` writes only the rows given — clear old rows explicitly when
+  replacing a phrase, or leftovers bleed through.
+- Instrument JSON: keys must match `saveJSON` exactly (`fm.operators` not `ops`,
+  `gb.envVol` not `gb.vol`); **macro objects require `"length"`** or they silently
+  don't apply; `get_instrument` wraps as `{index, instrument}`.
+- `list_effects` is not implemented yet (use `doc/3-pattern/effects.md` +
+  `doc/7-systems/`); `export_text` without separatePatterns is an upstream stub.
+- Volume column ranges differ per chip (OPM/2612/PCM 0-127, OPL 0-63, SN 0-15).
+- For composing music (chip choice, tempo/groove math, arrangement craft, the
+  stems/spectrogram verification loop), use the **compose-chiptune-over-mcp** skill.

@@ -1,0 +1,70 @@
+# Per-chip gotchas (all learned empirically — trust these over intuition)
+
+## Volume column ranges (writing 127 to an OPL channel ≠ loud, it clamps)
+
+| Chip | vol range |
+|---|---|
+| YM2612 (Genesis FM) | 0-127 |
+| SN76489 (Genesis PSG) | 0-15 |
+| OPL2/OPL3 | 0-63 |
+| YM2151 (OPM) | 0-127 |
+| SegaPCM / sample chips | 0-127 |
+
+## YM2612 + SN76489 (Genesis)
+
+- Channels: 0-5 FM (5 doubles as DAC when a Sample-type instrument plays on
+  it), 6-8 PSG squares, 9 PSG noise.
+- **SN noise channel accepts ONLY tracked notes C / C# / D** (3 preset rates;
+  D = highest/crispest). Any other note silently switches to tone3-shared
+  mode: square 3 gets programmed audibly (a constant whine at a pitch that
+  follows your "hat" note) and the noise turns periodic/buzzy. Force preset
+  white noise with effect `20 01` and/or a duty macro value 1.
+- DAC drums: Sample-type instrument (type 4) + `amiga.initSample`; note C-4
+  plays at natural rate.
+
+## OPL3 (YMF262)
+
+- 18 channels, but **4-op library patches are a trap**: check
+  `instrument.fm.ops` after EVERY import. A 4-op patch consumes a hardware
+  channel pair — on the wrong channel it silently kills a NEIGHBOR (observed:
+  ch6 4-op killed ch7) or is itself silent. The safe placements are
+  empirical, not documented (a Furnace allocation quirk): place 4-op voices
+  one at a time and verify stems after each; when a channel stays dead, use a
+  2-op patch or move to the high singles (15-17). Different 4-op patches can
+  behave differently on the same channel.
+- Waveforms 4-7 need OPL3 mode (fine in Furnace's OPL3, absent on OPL2).
+- Build dev binaries `-DCONSOLE_SUBSYSTEM=ON` or there is no stdout at all.
+
+## YM2151 (OPM) + SegaPCM
+
+- OPM: 8 channels, ALL native 4-op — no pairing traps. SegaPCM: 16 sample
+  channels after the OPM block (channel 8+); Sample-type instruments work.
+- **OPM library .dmp patches vary >10x in baked-in loudness** ("trashy
+  guitar" inaudible at 78, harsh at 127; "Organ 2 (Percussive)" healthy at
+  106). Level-audition before committing (render candidates at equal volume,
+  compare stem peaks).
+- PCM drums overpower OPM FM by ~10:1 at equal note volumes — balance with
+  chip mixer volumes (e.g. FM 1.0 / PCM 0.35), then master ~1.5.
+
+## Instrument JSON contract (all chips)
+
+- Keys must match `saveJSON` exactly: `fm.operators` (array; `fm.ops` is the
+  scalar count), `gb.envVol/envDir/envLen/soundLen`, macro code 2 = duty/
+  noise-mode, 3 = wave. Unknown keys are rejected with dotted paths — good;
+  read the error.
+- **Macro objects require `"length"`** or they silently never apply (decay
+  macros absent = every PSG note sustains forever = "hiss"/wash).
+- `get_instrument` returns `{index, instrument}` — unwrap.
+- Imported `.dmp` can sound an octave off written pitch (verify stem
+  fundamentals vs score; transpose the written notes, not the patch).
+
+## Sequencer semantics
+
+- `order_ops add` inserts AFTER the current order, not at the end
+  (`deep_clone_end` appends). After structural surgery, `read_orders` and
+  verify the matrix; safest is `write_orders` with an explicit full matrix.
+- `write_pattern` writes ONLY the rows given — replacing a phrase means
+  clearing the old rows explicitly first (leftover notes bleed through).
+- Effects persist until changed (vibrato, panning, porta): reset with
+  `04 00` / `01 00` etc. when a phrase ends.
+- `0Bxx` at the last row jumps to order xx (loop point).
