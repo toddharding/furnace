@@ -74,6 +74,35 @@
   budget — size samples accordingly.
 - Hardware noise per channel: `11 01` toggle + `1D xx` frequency (0-1F).
 
+## C64 (SID 6581/8580)
+
+- 3 channels; instruments are type 3 and the feature block is keyed `"64"`
+  (not `"c64"`): `waveforms` {tri,saw,pulse,noise}, `duty` 0-4095,
+  `envelope` {attack,decay,sustain,release} all 0-15, `filter`
+  {init,lowPass/bandPass/highPass,cutoff 0-2047,resonance,to,isAbsolute}.
+- **The volume column IS per-channel in Furnace** (measured: vol 8 ≈ 0.49x
+  the RMS of vol 15) — the real SID's global-volume-register limitation does
+  not constrain authoring here. Range 0-15.
+- **Triangle is ~40% the amplitude of pulse** at equal settings; noise is
+  quieter still. Drum bodies want pulse (wave macro e.g. `[8,4,4,4]` =
+  noise crack then square thump), not triangle, or they vanish under a
+  pulse bass. Drums = wave macro (code 3, waveform bitmask: 1 tri, 2 saw,
+  4 pulse, 8 noise) + relative arp macro for the pitch drop
+  (`[24,-2,-6,...]` works; measured kick 233→89 Hz) + ADSR decaying to
+  sustain 0 (self-terminating: droning impossible by construction).
+- **One filter, whole chip.** An instrument with `filter.init:true` + `to`
+  owns/re-inits it on every key-on, so only ONE part at a time should claim
+  the filter (bass in the groove, pad in a bridge). Sweep it during a held
+  note with `24xx`/`25xx` cutoff slides (init only fires on key-on); cancel
+  with `2400` before the next section. Absolute cutoff is `4xxx` (0-7FF,
+  code byte 0x40|hi, value lo); pulse width is `3xxx` likewise.
+- Arps: `00xy` + `E0xx` arp speed (1 = 60 Hz shimmer). Live ADSR rewrites:
+  `20xy` attack/decay, `21xy` sustain/release.
+- Envelope lifecycle: sustain holds forever while gated — SID has no
+  hardware fade-after-sustain, so phrase parts need note-OFF hygiene plus a
+  release value that matches the tail you want (r=3 bass ≈ tight, r=5 lead
+  ≈ short sing-off, r=8 pad wash). Percussion: decay to sustain 0.
+
 ## Instrument JSON contract (all chips)
 
 - Keys must match `saveJSON` exactly: `fm.operators` (array; `fm.ops` is the
