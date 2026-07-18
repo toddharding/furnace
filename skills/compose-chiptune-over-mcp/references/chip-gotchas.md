@@ -19,6 +19,12 @@
   mode: square 3 gets programmed audibly (a constant whine at a pitch that
   follows your "hat" note) and the noise turns periodic/buzzy. Force preset
   white noise with effect `20 01` and/or a duty macro value 1.
+- **YM2612 panning is a hard binary L/center/R switch (2 register bits), not
+  a blend**: `08xy` with both x and y nonzero always reads as center
+  (measured: `08 B3` produced byte-identical L/R — a silent no-op). For real
+  separation use `08 F0` (left only) / `08 0F` (right only); anything
+  in-between has no effect on this chip. Verify with an L-R diff render, not
+  by eyeballing the effect value — a plausible-looking xy pans nothing.
 - DAC drums: Sample-type instrument (type 4) + `amiga.initSample`; note C-4
   plays at natural rate.
 
