@@ -109,6 +109,36 @@
   release value that matches the tail you want (r=3 bass ≈ tight, r=5 lead
   ≈ short sing-off, r=8 pad wash). Percussion: decay to sustain 0.
 
+## Adding a PCM sample chip alongside FM/PSG (real drum samples)
+
+Tool is `add_system` (singular), not `add_systems`; pass the chip's numeric
+`id` from `list_available_systems`. "SegaPCM (compatible 5-channel mode)"
+(id 64) is a light 5-channel option to bolt real drum samples onto a
+YM2612+SN76489 setup without disturbing existing channels — new channels
+append after existing ones (e.g. 10-14 on a 10-channel song) and existing
+FM/PSG channel indices/patterns are untouched.
+
+- **`write_orders` must be re-issued with the new channel count** — adding a
+  chip does NOT extend the orders matrix's per-channel columns to match; the
+  new channels default to pattern-slot 0 for every order until you rewrite
+  the full matrix (`[[i]*newChannelCount for i in range(numOrders)]`).
+- **New PCM channels read as `name`/`abbrev` `"??"`** in `get_channels` — an
+  upstream Furnace quirk in this compatibility mode's channel-name table,
+  not an MCP-write bug (audio on those channels is fine). Fix cosmetically
+  with `set_channel {channel, name, abbrev}`.
+- Workflow: synthesize/author the sample as s16le PCM (numpy is fine for
+  drums — pitch-swept sine + noise transient reads as a kick, noise+tone
+  burst as a snare, high-passed noise tick as a hat), `add_sample` →
+  `set_sample_data` (base64 PCM + `rate`) → `set_sample_props` (name, loop
+  off for one-shots, `centerRate` matching the render rate). Instrument is
+  `type:4`, block `amiga: {useSample:true, initSample: <sample index>}`;
+  trigger with note `C-4` (plays at centerRate, same convention as the SNES
+  BRR path).
+- Migrating existing synth-drum patterns to samples: read every order's old
+  channel, keep row positions and translate volumes, write to the new
+  channel — this preserves every fill/variation already composed instead of
+  re-authoring the drum part from scratch.
+
 ## Instrument JSON contract (all chips)
 
 - Keys must match `saveJSON` exactly: `fm.operators` (array; `fm.ops` is the
