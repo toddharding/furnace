@@ -138,6 +138,34 @@ FM/PSG channel indices/patterns are untouched.
   channel, keep row positions and translate volumes, write to the new
   channel — this preserves every fill/variation already composed instead of
   re-authoring the drum part from scratch.
+- **Neither of these actually worked in a real test (2026-07-18, YM2612+
+  SN76489 song, dev249) — don't trust the theory, verify with the
+  oscilloscope before committing to a PCM approach**:
+  - "SegaPCM (compatible 5-channel mode)" (id 64) accepted the sample/
+    instrument writes with no errors, but every channel's live
+    `get_channel_oscilloscope` read back a flat linear ramp (not silence,
+    not the sample — a straight-line ramp, which is what corrupted/
+    misaddressed sample memory looks like). `render_wav` per-channel
+    agreed: peak stuck at the idle-channel noise floor. Root cause
+    unconfirmed; suspect this compat mode's own bank/address scheme isn't
+    satisfied by plain `add_sample`+`set_sample_data`+`amiga.initSample`.
+  - The commonly-cited YM2612 "channel 6 is a DAC when a Sample-type
+    instrument plays on it" trick **also produced total silence** in this
+    same test (both FM5 and FM6 tried, oscilloscope and per-channel render
+    both flat at the noise floor) despite instrument/pattern readback
+    looking correct (`type:4`, `amiga.useSample:true`, valid `initSample`).
+    Do not assume this works without a live oscilloscope check first.
+  - `set_sample_props {depth:8}` on a 16-bit sample does NOT requantize —
+    it silently guts the sample to near-silence (peak dropped from 0.22 to
+    0.035, the idle floor). Never use it to "fix" a format mismatch; if a
+    chip needs 8-bit PCM, synthesize/encode the sample as 8-bit from the
+    start.
+  - When a PCM approach won't cooperate within reasonable effort, the
+    faster win is reverting to synth-only drums (noise/pulse macros) that
+    are proven to render audibly on the chips already in the song — don't
+    keep guessing at chip-specific PCM addressing quirks against the
+    user's patience. Verify the revert step too: oscilloscope AND
+    per-channel render peak, not just "no error from the API".
 
 ## Instrument JSON contract (all chips)
 
