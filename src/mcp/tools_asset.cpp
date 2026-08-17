@@ -900,10 +900,12 @@ void registerAssetTools(FurnaceMCP& m) {
     "  resample: to_rate (target Hz, required), filter (0=none,1=linear,2=cubic,3=blep,4=sinc,5=best; default 1) — resamples audio from the current centerRate; centerRate is left unchanged (mirrors the GUI)\n"
     "  reverse / invert / sign_flip: (range) reverse order / negate / flip sign bit\n"
     "  filter: (range) state-variable filter. cutoff (Hz, default centerRate/4), cutoffEnd (Hz, for sweep), sweep (bool), resonance (0..0.99, default 0), power (1..3, default 1), low/band/high (mix 0..1; default low=1)\n"
-    "  crossfade_loop: length (frames), law (0=linear..100=equal-power, default 0) — blends pre-loop audio into the loop tail; requires loopStart/loopEnd set",
+    "  crossfade_loop: length (frames), law (0=linear..100=equal-power, default 0) — blends pre-loop audio into the loop tail; requires loopStart/loopEnd set\n"
+    "  trim_side_noise: (range) threshold (dBFS -144..0, default -60) — cuts leading/trailing noise floor, keeping a decaying tail (128-frame window, quarter must exceed threshold); reports trimmedStart/trimmedEnd\n"
+    "  tune_loop: target (0=Amiga 1=SNES 2=Namco C219 3=NDS 16-bit 4=NDS 8-bit 5=NDS IMA 6=GBA DMA, default 0), filter (resample filter, default 1) — resamples so the loop length hits the chip's block alignment, then snaps both loop points onto it; this is the fix for a looped sample that clicks on hardware. Changes centerRate; reports the new centerRate/loopStart/loopEnd",
     json{{"type","object"},{"properties",{
       {"index",{{"type","integer"}}},
-      {"op",{{"type","string"},{"enum",json::array({"amplify","normalize","fade_in","fade_out","silence","insert_silence","trim","resample","reverse","invert","sign_flip","filter","crossfade_loop"})}}},
+      {"op",{{"type","string"},{"enum",json::array({"amplify","normalize","fade_in","fade_out","silence","insert_silence","trim","resample","reverse","invert","sign_flip","filter","crossfade_loop","trim_side_noise","tune_loop"})}}},
       {"from",{{"type","integer"},{"description","range start frame (default 0)"}}},
       {"to",{{"type","integer"},{"description","range end frame exclusive (default length)"}}},
       {"volume",{{"type","number"}}},
@@ -920,7 +922,9 @@ void registerAssetTools(FurnaceMCP& m) {
       {"low",{{"type","number"}}},
       {"band",{{"type","number"}}},
       {"high",{{"type","number"}}},
-      {"law",{{"type","integer"}}}
+      {"law",{{"type","integer"}}},
+      {"threshold",{{"type","number"},{"description","trim_side_noise: noise floor in dBFS (-144..0)"}}},
+      {"target",{{"type","integer"},{"description","tune_loop: chip alignment target 0..6"}}}
     }},{"required",json::array({"index","op"})}},
     [](FurnaceMCP& m, const json& args) -> json {
       DivEngine* e=m.engine();
@@ -1094,6 +1098,114 @@ void registerAssetTools(FurnaceMCP& m) {
           }
           e->renderSamples(idx);
         });
+      } else if (op=="trim_side_noise") {
+        // port of GUI_ACTION_SAMPLE_TRIM_SIDE_NOISE: walk a 128-frame window in
+        // from each end and cut until a quarter of the window is above threshold,
+        // so a decaying tail isn't mistaken for the noise floor.
+        unsigned int from,to; mcpRange(args,s->samples,from,to);
+        double thresholdDb=mcpOptFloat(args,"threshold",-60.0);
+        if (thresholdDb<-144.0 || thresholdDb>0.0) throw std::runtime_error("'threshold' must be -144..0 (dBFS)");
+        if (to<=from) throw std::runtime_error("trim_side_noise needs a non-empty range");
+        unsigned int newStart=from, newEnd=to;
+        e->lockEngine([&]() {
+          float linThreshold=powf(10.0f,(float)thresholdDb/20.0f)*(is16?32767.0f:127.0f);
+          unsigned int windowSize=128;
+          if (windowSize>(to-from)) windowSize=to-from;
+          unsigned int minCount=windowSize/4;
+          if (minCount<1) minCount=1;
+          auto at=[&](unsigned int i)->float { return fabsf(is16?(float)s->data16[i]:(float)s->data8[i]); };
+
+          unsigned int count=0;
+          for (unsigned int j=0; j<windowSize; j++) if (at(from+j)>=linThreshold) count++;
+          for (unsigned int i=from; i+windowSize<=to; i++) {
+            if (count>=minCount) { newStart=i; break; }
+            if (at(i)>=linThreshold) count--;
+            if (i+windowSize<to && at(i+windowSize)>=linThreshold) count++;
+          }
+          count=0;
+          for (unsigned int j=0; j<windowSize; j++) if (at(to-windowSize+j)>=linThreshold) count++;
+          for (unsigned int i=to; (i-from)>=windowSize; i--) {
+            if (count>=minCount) { newEnd=i; break; }
+            if (at(i-1)>=linThreshold) count--;
+            if (i>=from+windowSize && at(i-windowSize-1)>=linThreshold) count++;
+          }
+
+          if (newStart<newEnd && (newStart>from || newEnd<to)) {
+            if (from==0 && to==s->samples) {
+              s->trim(newStart,newEnd);
+            } else {
+              if (newEnd<to) s->strip(newEnd,to);
+              if (newStart>from) s->strip(from,newStart);
+            }
+          }
+          e->renderSamples(idx);
+        });
+        result["trimmedStart"]=(int)(newStart-from);
+        result["trimmedEnd"]=(int)(to-newEnd);
+      } else if (op=="tune_loop") {
+        // port of GUI_ACTION_SAMPLE_FIX_LOOP: resample so the loop length lands on
+        // the target chip's block alignment, then snap both loop points onto it.
+        // this is what makes a looped sample stop clicking on SNES/Amiga hardware.
+        static const int startAlign[7]={2,16,2,2,4,8,4};
+        static const int lengthAlign[7]={2,16,2,2,4,8,16};
+        static const char* targetName[7]={"amiga","snes","c219","nds16","nds8","ndsima","gba_dma"};
+        int target=mcpOptInt(args,"target",0);
+        if (target<0 || target>=7) throw std::runtime_error("'target' must be 0..6 (0=Amiga 1=SNES 2=Namco C219 3=NDS 16-bit 4=NDS 8-bit 5=NDS IMA 6=GBA DMA)");
+        int strat=mcpOptInt(args,"filter",DIV_RESAMPLE_LINEAR);
+        if (!s->isLoopable() || s->loopEnd<=s->loopStart) throw std::runtime_error("tune_loop requires a valid loop (set loop/loopStart/loopEnd with set_sample_props)");
+        int currentLoopLength=s->loopEnd-s->loopStart;
+        if (currentLoopLength<1) throw std::runtime_error("loop length must be greater than zero");
+
+        int alignLength=lengthAlign[target];
+        int targetLoopLength=((currentLoopLength+(alignLength>>1))/alignLength)*alignLength;
+        if (targetLoopLength<alignLength) targetLoopLength=alignLength;
+        double currentRate=s->centerRate;
+        double targetFixRate=currentRate*((double)targetLoopLength/(double)currentLoopLength);
+        if (targetFixRate<100.0) targetFixRate=100.0;
+        if (targetFixRate>384000.0) targetFixRate=384000.0;
+
+        auto snapAlignedInRange=[](int value, int align, int minValue, int maxValue, int& out)->bool {
+          if (minValue>maxValue) return false;
+          if (align<=1) { out=CLAMP(value,minValue,maxValue); return true; }
+          int first=((minValue+align-1)/align)*align;
+          int last=(maxValue/align)*align;
+          if (first>last) return false;
+          int down=(value/align)*align;
+          if (value<0 && (value%align)!=0) down-=align;
+          int up=down+align;
+          if (down<first) down=first;
+          if (down>last) down=last;
+          if (up<first) up=first;
+          if (up>last) up=last;
+          int downDist=value-down; if (downDist<0) downDist=-downDist;
+          int upDist=up-value; if (upDist<0) upDist=-upDist;
+          out=(upDist<=downDist)?up:down;
+          return true;
+        };
+
+        String failure;
+        e->lockEngine([&]() {
+          if (!s->resample(currentRate,targetFixRate,strat)) { failure="couldn't resample (8/16-bit samples only, target rate >= 100Hz)"; return; }
+          int sampleCount=(int)s->samples;
+          if (sampleCount<lengthAlign[target]) { failure="sample is too short for the selected target alignment"; return; }
+          int currentStart=s->loopStart;
+          int currentLength=s->loopEnd-s->loopStart;
+          if (currentLength<1) { failure="loop became invalid after resampling"; return; }
+          int snappedLength=0;
+          if (!snapAlignedInRange(currentLength,lengthAlign[target],lengthAlign[target],sampleCount,snappedLength)) { failure="unable to fit an aligned loop length into the sample"; return; }
+          int snappedStart=0;
+          if (!snapAlignedInRange(currentStart,startAlign[target],0,sampleCount-snappedLength,snappedStart)) { failure="unable to fit an aligned loop start into the sample"; return; }
+          s->loopStart=snappedStart;
+          s->loopEnd=snappedStart+snappedLength;
+          if (s->loopEnd>sampleCount) s->loopEnd=sampleCount;
+          if (s->loopEnd<=s->loopStart) { failure="failed to produce a valid aligned loop"; return; }
+          e->renderSamples(idx);
+        });
+        if (!failure.empty()) throw std::runtime_error(failure);
+        result["target"]=targetName[target];
+        result["centerRate"]=(int)s->centerRate;
+        result["loopStart"]=s->loopStart;
+        result["loopEnd"]=s->loopEnd;
       } else {
         throw std::runtime_error(fmt::sprintf("unknown op: %s",op));
       }

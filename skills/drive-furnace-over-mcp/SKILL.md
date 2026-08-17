@@ -71,8 +71,8 @@ agent-facing description; that listing is the authoritative surface.
   macros), `export/import_instrument` (.fui and 14 other formats).
 - **Assets**: wavetables (CRUD, `generate_wavetable` shapes/harmonics/FM, import/
   export) and samples (CRUD, PCM in/out as base64 s16le, props/loops, `sample_dsp`:
-  amplify/normalize/fade/trim/resample/reverse/filter/crossfade-loop..., WAV
-  import/export).
+  amplify/normalize/fade/trim/resample/reverse/filter/crossfade-loop/
+  trim-side-noise/tune-loop..., WAV import/export).
 - **Transport & live input**: `play` (optional order), `stop`, `panic`, `set/get_order`,
   `get_position` (order/row/tick/speed live), `note_on`/`note_off` (jam on a channel).
 - **Observe (see what a user sees)**: `get_channel_states` (live note/ins/vol/effects
