@@ -104,6 +104,14 @@ block is literally named for it). Reach for it for any sample-driven genre
 - Synthesized single-cycle loops work great (BRR-friendly: loop length a
   multiple of 16, exact integer periods loop clean without crossfade; e.g.
   64-frame cycle at 16 kHz, `centerRate` 16744 puts C-4 at 261.6 Hz).
+- **When a loop you did NOT author lands off the 16-frame grid** (an imported
+  or DSP-mangled sample), don't hand-nudge the loop points — that detunes or
+  clicks. `sample_dsp {op:"tune_loop", target:1}` resamples so the loop length
+  hits the chip's block size, snaps both points onto it, and retunes
+  `centerRate` to hold the pitch (targets: 0 Amiga, 1 SNES, 2 Namco C219,
+  3/4/5 NDS 16-bit/8-bit/IMA, 6 GBA DMA). Read back the reported
+  `centerRate`/`loopStart`/`loopEnd` — the rate change is real and any note
+  math you did earlier must be redone against it.
 - **`snes.r` (sustain rate) 0 = hold forever = "drony"** — looped-sample
   voices sustain at level `s` until the next note. Set `r>0` for a natural
   fade after sustain (measured: r=12 on a pad/choir ≈ −12 dB ~2 s after the
@@ -216,6 +224,33 @@ FM/PSG channel indices/patterns are untouched.
 - `get_instrument` returns `{index, instrument}` — unwrap.
 - Imported `.dmp` can sound an octave off written pitch (verify stem
   fundamentals vs score; transpose the written notes, not the patch).
+- The block set per type is not guesswork: `describe_instrument_schema {type}`
+  lists exactly which blocks that `DivInstrumentType` accepts. Ask it before
+  writing an instrument for a chip you have not used here before.
+
+## Klattsch (speech synth, chip id 114, instrument type 67)
+
+- A Klatt-style formant SPEECH synth, not a music chip: you write PHONEMES and
+  it sings/speaks them at the tracked pitch. 1 channel by default, up to 16.
+- **Words are written in the pattern, not sampled**: `10xx` sets the phoneme by
+  ARPABET index, and the name can be typed directly into the pattern. Sequence
+  phonemes row by row; `11xx` sets the spectral transition time in ticks, which
+  is what makes them glide instead of clicking between segments.
+- Formants are addressable per row: `12xx`/`13xx`/`14xx` set F1/F2/F3 frequency
+  (F1 in 10 Hz steps, F2/F3 in 16 Hz), `15xx`/`16xx`/`17xx` their amplitudes.
+- The `klattsch` instrument block is 10 bytes holding the DEFAULTS for the same
+  parameters the effects override: `transition` (=`11xx`), `voicing` (`18xx`),
+  `aspiration` (`19xx`), `tilt` (`1Axx`, signed: 00-7F positive, 80-FE
+  negative), `effort` (`1Bxx`), `vibrato` (`1Cxy`), `tremolo` (`1Dxy`), `gain`
+  (`1Exx`, xx/16), `bandwidth` (`1Fxx`, xx/64) and `formantShift` (a /64 scale
+  on all three formant frequencies and bandwidths — the "bigger or smaller
+  head" knob). Identical byte encodings both places, so a value you dial in
+  with an effect moves into the instrument unchanged.
+- Watch the sentinels: for most of these effects `FF` means "revert to the
+  instrument default", but `gain` and `bandwidth` use `00` for that instead.
+- `list_effects {channel}` on a Klattsch channel is the full vocabulary (79);
+  read it before writing — the formant effects have no analogue on the music
+  chips.
 
 ## Sequencer semantics
 

@@ -118,6 +118,7 @@ static const char* mcpInsTypeName(int t) {
     case DIV_INS_SUPERVISION: return "Watara Supervision";
     case DIV_INS_UPD1771C: return "NEC uPD1771C";
     case DIV_INS_SID3: return "SID3";
+    case DIV_INS_KLATTSCH: return "Klattsch (speech)";
     default: return "Unknown";
   }
 }
@@ -662,6 +663,27 @@ static void mcpApplyPowerNoise(DivInstrumentPowerNoise& pn, const json& o, const
   }
 }
 
+// Klattsch speech synth. every field is a byte using the same encoding as the
+// chip's corresponding pattern effect, so values round-trip 1:1 with saveJSON.
+static void mcpApplyKlattsch(DivInstrumentKlattsch& kl, const json& o, const String& path) {
+  for (auto it=o.begin(); it!=o.end(); ++it) {
+    const String k=it.key();
+    const json& v=it.value();
+    String p=path+"."+k;
+    if (k=="transition") kl.transition=(unsigned char)jI(v,p);
+    else if (k=="voicing") kl.voicing=(unsigned char)jI(v,p);
+    else if (k=="aspiration") kl.aspiration=(unsigned char)jI(v,p);
+    else if (k=="tilt") kl.tilt=(unsigned char)jI(v,p);
+    else if (k=="effort") kl.effort=(unsigned char)jI(v,p);
+    else if (k=="vibrato") kl.vibrato=(unsigned char)jI(v,p);
+    else if (k=="tremolo") kl.tremolo=(unsigned char)jI(v,p);
+    else if (k=="gain") kl.gain=(unsigned char)jI(v,p);
+    else if (k=="bandwidth") kl.bandwidth=(unsigned char)jI(v,p);
+    else if (k=="formantShift") kl.formantShift=(unsigned char)jI(v,p);
+    else mcpUnknownKey(p);
+  }
+}
+
 static void mcpApplyWaveSynth(DivInstrumentWaveSynth& ws, const json& o, const String& path) {
   for (auto it=o.begin(); it!=o.end(); ++it) {
     const String k=it.key();
@@ -859,6 +881,7 @@ static void mcpApplyInstrumentJSON(DivInstrument& ins, const json& data) {
     else if (k=="waveSynth") mcpApplyWaveSynth(ins.ws,jObj(v,p),p);
     else if (k=="sid2") mcpApplySID2(ins.sid2,jObj(v,p),p);
     else if (k=="sid3") mcpApplySID3(ins.sid3,jObj(v,p),p);
+    else if (k=="klattsch") mcpApplyKlattsch(ins.klattsch,jObj(v,p),p);
     else mcpUnknownKey(p);
   }
 }
@@ -1179,6 +1202,7 @@ void registerInstrumentTools(FurnaceMCP& m) {
           case DIV_INS_ES5506: add("amiga"); add("es5506"); break;
           case DIV_INS_X1_010: add("x1_010"); add("amiga"); ws=true; break;
           case DIV_INS_POWERNOISE: case DIV_INS_POWERNOISE_SLOPE: add("powernoise"); break;
+          case DIV_INS_KLATTSCH: add("klattsch"); break;
           default: break; // STD/TIA/SAA/VIC/PET/etc: macros only
         }
         if (ws) add("waveSynth");
