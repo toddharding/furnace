@@ -52,6 +52,44 @@
 - PCM drums overpower OPM FM by ~10:1 at equal note volumes — balance with
   chip mixer volumes (e.g. FM 1.0 / PCM 0.35), then master ~1.5.
 
+## Amiga (Paula) — the reliable sample chip (use this when PCM fails elsewhere)
+
+When SegaPCM-compat and the YM2612 DAC would not play samples (see the PCM
+section above), the **Amiga (Paula, id 18)** played them perfectly on the
+first try — it is Furnace's reference sample chip (the `amiga` instrument
+block is literally named for it). Reach for it for any sample-driven genre
+(jungle/DnB, breakbeat, anything needing real drum/instrument samples).
+
+- 4 sample channels per chip; `add_system` a **second Amiga for 8 channels**.
+  Chip 0 = channels 0-3, chip 1 = channels 4-7. New Amiga song starts with
+  **0 instruments** (not 1) — `add_instrument` before `set_instrument`.
+- Instruments are `type:4`, block `amiga:{useSample:true, initSample:<idx>}`.
+  Trigger a sample at note `C-4` = played at its `centerRate`; other notes
+  transpose. Verified working via `get_channel_oscilloscope` (real waveform,
+  not the flat ramp/silence the other PCM routes gave).
+- **Sustained/looped voices** (pads, sub, flute): `set_sample_props` with
+  `loop:true` + `loopStart`/`loopEnd`. Seamless loop trick: synthesize an
+  integer number of cycles at a rate where C-4 = exactly 64 samples
+  (`SR=16744`), start/end at the same phase, then loop the whole sample
+  (`loopStart:0, loopEnd:len`) — no click. One-shot voices (kick, snare,
+  struck Rhodes) bake their decay and need no loop.
+- **Envelopes = a volume macro** (macro `code:0`, Amiga vol range **0-64**).
+  Give looped voices attack/sustain/release via the macro's `loop` (sustain
+  step) and `release` (index the fade starts on) so key-off fades smoothly —
+  without a release the looped sample cuts abruptly. This is the Amiga's
+  ADSR; there is no per-note hardware envelope.
+- **Panning needs the chip flag, not an effect.** Per-row `08xy` AND `80xx`
+  are silent no-ops by default (the render is dead mono). Enable
+  `set_chip_flags {index, flags:{stereo:true, stereoSep:<width>}}` on each
+  chip. Then the **fixed Paula hardware layout** applies: within each 4-ch
+  chip, positions **0,3 -> LEFT, 1,2 -> RIGHT** (you cannot center an
+  individual channel). Assign channels to sides by loudness to balance:
+  split the loud low end (kick one side, sub the other), split stereo-pair
+  voices (dual Rhodes L/R for width). A lone loud element (a prominent sub)
+  will tip its side — lower it (better mix anyway) rather than piling
+  counterweight. **Verify with an L-R diff render + per-side RMS balance**
+  (target within ~1 dB); do not trust that a pan value did anything.
+
 ## SNES (S-SMP/DSP)
 
 - 8 sample channels; instruments are type 29 with `amiga.useSample` +
