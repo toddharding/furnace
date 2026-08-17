@@ -217,6 +217,7 @@ enum FurnaceGUIColors {
   GUI_COLOR_SLIDER_GRAB_ACTIVE,
   GUI_COLOR_TITLE_BACKGROUND_ACTIVE,
   GUI_COLOR_CHECK_MARK,
+  GUI_COLOR_CHECKBOX_BACKGROUND_ACTIVE,
   GUI_COLOR_TEXT_SELECTION,
   GUI_COLOR_TABLE_ROW_EVEN,
   GUI_COLOR_TABLE_ROW_ODD,
@@ -746,6 +747,7 @@ enum FurnaceGUIWarnings {
   GUI_WARN_RESET_CONFIG,
   GUI_WARN_IMPORT,
   GUI_WARN_NPR,
+  GUI_WARN_QUIT_SETTINGS,
   GUI_WARN_GENERIC
 };
 
@@ -1013,11 +1015,13 @@ enum FurnaceGUIActions {
   GUI_ACTION_SAMPLE_INSERT,
   GUI_ACTION_SAMPLE_DELETE,
   GUI_ACTION_SAMPLE_TRIM,
+  GUI_ACTION_SAMPLE_TRIM_SIDE_NOISE,
   GUI_ACTION_SAMPLE_REVERSE,
   GUI_ACTION_SAMPLE_INVERT,
   GUI_ACTION_SAMPLE_SIGN,
   GUI_ACTION_SAMPLE_FILTER,
   GUI_ACTION_SAMPLE_CROSSFADE_LOOP,
+  GUI_ACTION_SAMPLE_FIX_LOOP,
   GUI_ACTION_SAMPLE_PREVIEW,
   GUI_ACTION_SAMPLE_STOP_PREVIEW,
   GUI_ACTION_SAMPLE_ZOOM_IN,
@@ -1029,6 +1033,7 @@ enum FurnaceGUIActions {
   GUI_ACTION_SAMPLE_COPY_NEW,
   GUI_ACTION_SAMPLE_TRIM_AFTER_LOOP,
   GUI_ACTION_SAMPLE_TRIM_TO_LOOP,
+  GUI_ACTION_SAMPLE_SELECT_LOOP,
   GUI_ACTION_SAMPLE_MAX,
 
   GUI_ACTION_ORDERS_MIN,
@@ -2528,6 +2533,22 @@ class FurnaceGUI {
 
   SelectionPoint selStart, selEnd, cursor, cursorDrag, dragStart, dragEnd;
   SelectionPoint undoSelStart, undoSelEnd, undoCursor;
+  struct PendingPhonemeEntry {
+    int chan=-1;
+    int ord=-1;
+    int row=-1;
+    int col=-1;
+    bool canCoalesce=false;
+    String buffer;
+  };
+  PendingPhonemeEntry pendingPhoneme;
+  struct KlattschCell {
+    DivPattern* pat=NULL;
+    int chan=-1;
+    int ord=-1;
+    int row=-1;
+    int col=-1;
+  };
   unsigned char curNibble;
   bool selecting, selectingFull, dragging, orderNibble, followOrders, followPattern, wasFollowing, changeAllOrders, mobileUI;
   bool collapseWindow, demandScrollX, fancyPattern, firstFrame, tempoView, waveHex, waveSigned, waveGenVisible, lockLayout, editOptsVisible, latchNibble, nonLatchNibble;
@@ -2541,6 +2562,7 @@ class FurnaceGUI {
   float peak[DIV_MAX_OUTPUTS];
   float patChanX[DIV_MAX_CHANS+1];
   float patChanSlideY[DIV_MAX_CHANS+1];
+  float patLineHeight;
   float lastPatternWidth, longThreshold;
   float buttonLongThreshold;
   String nextDesc;
@@ -2747,8 +2769,9 @@ class FurnaceGUI {
   int resizeSize, silenceSize;
   double resampleTarget;
   int resampleStrat;
+  int sampleFixLoopTarget;
   float amplifyVol, amplifyOff;
-  float noiseGateThreshold;
+  float trimSideNoiseThreshold;
   int sampleSelStart, sampleSelEnd;
   bool sampleInfo;
   bool sampleDragActive, sampleDragMode, sampleDrag16, sampleZoomAuto;
@@ -2766,7 +2789,7 @@ class FurnaceGUI {
   unsigned char sampleFilterPower;
   short* sampleClipboard;
   size_t sampleClipboardLen;
-  bool openSampleResizeOpt, openSampleResampleOpt, openSampleAmplifyOpt, openSampleSilenceOpt, openSampleFilterOpt, openSampleCrossFadeOpt, openSampleNoiseGateOpt;
+  bool openSampleResizeOpt, openSampleResampleOpt, openSampleAmplifyOpt, openSampleSilenceOpt, openSampleFilterOpt, openSampleCrossFadeOpt, openTrimSideNoiseOpt;
 
   // mixer
   // 0xxx: output
@@ -3040,6 +3063,10 @@ class FurnaceGUI {
   int sampleCompileIndex;
   size_t sampleCompileSize;
 
+  // speed window specific
+  Uint64 lastTapTime;
+  float grooveTargetBPM;
+
   // user presets window
   std::vector<int> selectedUserPreset;
 
@@ -3078,7 +3105,7 @@ class FurnaceGUI {
   void drawFMEnv(unsigned char tl, unsigned char ar, unsigned char dr, unsigned char d2r, unsigned char rr, unsigned char sl, unsigned char sus, unsigned char egt, unsigned char algOrGlobalSus, float maxTl, float maxArDr, float maxRr, const ImVec2& size, unsigned short instType);
   void drawSID3Env(unsigned char tl, unsigned char ar, unsigned char dr, unsigned char d2r, unsigned char rr, unsigned char sl, unsigned char sus, unsigned char egt, unsigned char algOrGlobalSus, float maxTl, float maxArDr, float maxRr, const ImVec2& size, unsigned short instType);
   void drawGBEnv(unsigned char vol, unsigned char len, unsigned char sLen, bool dir, const ImVec2& size);
-  bool drawSysConf(int chan, int sysPos, DivSystem type, DivConfig& flags, bool modifyOnChange, bool fromMenu=false);
+  bool drawSysConf(int chan, int sysPos, DivSystem type, DivConfig& flags, unsigned short& systemChans, bool modifyOnChange, bool fromMenu=false);
   void kvsConfig(DivInstrument* ins, bool supportsKVS=true);
   void drawFMPreview(const ImVec2& size);
   void renderFMPreview(const DivInstrument* ins, int pos=0);
@@ -3093,7 +3120,7 @@ class FurnaceGUI {
   void VerticalText(float maxSize, bool centered, const char* fmt, ...);
 
   // combo with locale
-  static bool LocalizedComboGetter(void* data, int idx, const char** out_text);
+  static const char* LocalizedComboGetter(void* data, int idx);
 
   // these ones offer ctrl-wheel fine value changes.
   bool isCtrlWheelModifierHeld() const;
@@ -3141,6 +3168,7 @@ class FurnaceGUI {
   void sameLineMaybe(float width=-1.0f);
 
   float calcBPM(const DivGroovePattern& speeds, float hz, int vN, int vD);
+  void calcGrooveBPM(float targetBPM, DivGroovePattern& groove, float hz, int hilightA);
 
   ImVec2 mapSelPoint(const SelectionPoint& s, float lineHeight);
 
@@ -3316,6 +3344,9 @@ class FurnaceGUI {
   void noteInput(int num, int key, int vol=-1, int chanOff=0);
   void rawFreqInput(int num);
   void valueInput(int num, bool direct=false, int target=-1);
+  KlattschCell klattschCellAtCursor();
+  bool writeKlattschPhoneme(const KlattschCell& cell, int phonemeIndex, bool coalesce=false);
+  bool tryArpabetInput(int sdlKeysym);
   void orderInput(int num);
 
   void doGenerateWave();

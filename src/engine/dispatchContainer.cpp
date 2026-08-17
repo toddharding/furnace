@@ -91,6 +91,7 @@
 #include "platform/dave.h"
 #include "platform/nds.h"
 #include "platform/bifurcator.h"
+#include "platform/klattsch.h"
 #include "platform/sid2.h"
 #include "platform/sid3.h"
 #include "platform/multipcm.h"
@@ -340,9 +341,9 @@ void DivDispatchContainer::init(DivSystem sys, DivEngine* eng, int chanCount, do
     case DIV_SYSTEM_YM2151:
       dispatch=new DivPlatformArcade;
       if (isRender) {
-        ((DivPlatformArcade*)dispatch)->setYMFM(eng->getConfInt("arcadeCoreRender",1)==0);
+        ((DivPlatformArcade*)dispatch)->setCore(eng->getConfInt("arcadeCoreRender",1));
       } else {
-        ((DivPlatformArcade*)dispatch)->setYMFM(eng->getConfInt("arcadeCore",0)==0);
+        ((DivPlatformArcade*)dispatch)->setCore(eng->getConfInt("arcadeCore",0));
       }
       break;
     case DIV_SYSTEM_YM2610_FULL:
@@ -725,6 +726,9 @@ void DivDispatchContainer::init(DivSystem sys, DivEngine* eng, int chanCount, do
       break;
     case DIV_SYSTEM_BIFURCATOR:
       dispatch=new DivPlatformBifurcator;
+      break;
+    case DIV_SYSTEM_KLATTSCH:
+      dispatch=new DivPlatformKlattsch;
       break;
     case DIV_SYSTEM_PCM_DAC:
       dispatch=new DivPlatformPCMDAC;

@@ -33,6 +33,7 @@
 #include "misc/cpp/imgui_stdlib.h"
 #include "plot_nolerp.h"
 #include "guiConst.h"
+#include "klattschInput.h"
 #include "intConst.h"
 #include "scaling.h"
 #include "introTune.h"
@@ -48,6 +49,7 @@
 #include <shlwapi.h>
 #include "../utfutils.h"
 #define LAYOUT_INI "\\layout.ini"
+#define MOBILE_LAYOUT_INI "\\mobileLayout.ini"
 #define BACKUPS_DIR "\\backups"
 #else
 #include <sys/types.h>
@@ -56,6 +58,7 @@
 #include <pwd.h>
 #include <sys/stat.h>
 #define LAYOUT_INI "/layout.ini"
+#define MOBILE_LAYOUT_INI "/mobileLayout.ini"
 #define BACKUPS_DIR "/backups"
 #endif
 
@@ -639,10 +642,9 @@ bool FurnaceGUI::NoteSelector(int* value, bool showOffRel, int octaveMin, int oc
   return ret;
 }
 
-bool FurnaceGUI::LocalizedComboGetter(void* data, int idx, const char** out_text) {
+const char* FurnaceGUI::LocalizedComboGetter(void* data, int idx) {
   const char* const* items=(const char* const*)data;
-  if (out_text) *out_text=_(items[idx]);
-  return true;
+  return _(items[idx]);
 }
 
 void FurnaceGUI::sameLineMaybe(float width) {
@@ -662,8 +664,7 @@ const char* FurnaceGUI::getSystemName(DivSystem which) {
 }
 
 void FurnaceGUI::updateScroll(int amount) {
-  float lineHeight=round(PAT_FONT_SIZE+2*dpiScale);
-  nextScroll=lineHeight*amount;
+  nextScroll=patLineHeight*amount;
   haveHitBounds=false;
 }
 
@@ -673,14 +674,12 @@ void FurnaceGUI::updateScrollRaw(float amount) {
 }
 
 void FurnaceGUI::addScroll(int amount) {
-  float lineHeight=round(PAT_FONT_SIZE+2*dpiScale);
-  nextAddScroll=lineHeight*amount;
+  nextAddScroll=patLineHeight*amount;
   haveHitBounds=false;
 }
 
 void FurnaceGUI::addScrollX(int amount) {
-  float lineHeight=round(PAT_FONT_SIZE+2*dpiScale);
-  nextAddScrollX=lineHeight*amount;
+  nextAddScrollX=patLineHeight*amount;
   haveHitBounds=false;
 }
 
@@ -1301,6 +1300,7 @@ DockSpace             ID=0x8B93E3BD Window=0xA787BDB4 Pos=0,24 Size=1280,776 Spl
       DockNode        ID=0x00000012 Parent=0x0000000B SizeRef=151,557 HiddenTabBar=1 Selected=0x4C07BC58\n\
     DockNode          ID=0x0000000C Parent=0x00000002 SizeRef=32,503 HiddenTabBar=1 Selected=0x644DA2C1\n";
 
+const char* defaultMobileLayout="\n";
 
 void FurnaceGUI::prepareLayout() {
   FILE* check;
@@ -1318,7 +1318,11 @@ void FurnaceGUI::prepareLayout() {
     return;
   }
 
-  fwrite(defaultLayout,1,strlen(defaultLayout),check);
+  if (mobileUI) {
+    fwrite(defaultMobileLayout,1,strlen(defaultMobileLayout),check);
+  } else {
+    fwrite(defaultLayout,1,strlen(defaultLayout),check);
+  }
   fclose(check);
 }
 
@@ -1524,6 +1528,153 @@ void FurnaceGUI::noteInput(int num, int key, int vol, int chanOff) {
   }
   makeUndo(GUI_UNDO_PATTERN_EDIT,UndoRegion(ord,ch,y,ord,ch,y));
   curNibble=0;
+}
+
+// return the klattsch phoneme cell under the cursor, if any.
+FurnaceGUI::KlattschCell FurnaceGUI::klattschCellAtCursor() {
+  KlattschCell cell;
+  const int ch=cursor.xCoarse;
+  const int col=cursor.xFine;
+
+  if (col<3 || ((col-3)&1)==0) return cell; // not an effect-value column
+  if (ch<0 || ch>=e->getTotalChannelCount()) return cell;
+  if (e->song.sysOfChan[ch]!=DIV_SYSTEM_KLATTSCH) return cell;
+
+  int ord=curOrder;
+  int row=cursor.y;
+  if (e->isPlaying() && !e->isStepping() && followPattern) {
+    e->getPlayPos(ord,row);
+  }
+  DivPattern* pat=e->curPat[ch].getPattern(e->curOrders->ord[ch][ord],true);
+  if (pat->newData[row][col-1]!=0x10) return cell; // not the phoneme effect
+
+  cell.pat=pat;
+  cell.chan=ch;
+  cell.ord=ord;
+  cell.row=row;
+  cell.col=col;
+  return cell;
+}
+
+bool FurnaceGUI::writeKlattschPhoneme(const KlattschCell& cell, int phonemeIndex, bool coalesce) {
+  const short newValue=phonemeIndex&0xff;
+  if (cell.pat->newData[cell.row][cell.col]==newValue) return false;
+  if (coalesce && !undoHist.empty() &&
+      pendingPhoneme.chan==cell.chan && pendingPhoneme.ord==cell.ord &&
+      pendingPhoneme.row==cell.row && pendingPhoneme.col==cell.col) {
+    UndoStep& step=undoHist.back();
+    if (step.type==GUI_UNDO_PATTERN_EDIT && step.pat.size()==1) {
+      UndoPatternData& edit=step.pat.front();
+      const int patIndex=e->curOrders->ord[cell.chan][cell.ord];
+      if (edit.subSong==(int)e->getCurrentSubSong() && edit.chan==cell.chan &&
+          edit.pat==patIndex && edit.row==cell.row && edit.col==cell.col &&
+          edit.newVal==cell.pat->newData[cell.row][cell.col]) {
+        cell.pat->newData[cell.row][cell.col]=newValue;
+        if (edit.oldVal==newValue) {
+          undoHist.pop_back();
+        } else {
+          edit.newVal=newValue;
+        }
+        return true;
+      }
+    }
+  }
+  prepareUndo(GUI_UNDO_PATTERN_EDIT);
+  cell.pat->newData[cell.row][cell.col]=newValue;
+  makeUndo(GUI_UNDO_PATTERN_EDIT);
+  return true;
+}
+
+// let letter keys enter ARPABET names in klattsch 10xx values.
+bool FurnaceGUI::tryArpabetInput(int sdlKeysym) {
+  KlattschCell cell=klattschCellAtCursor();
+  if (cell.pat==NULL) {
+    pendingPhoneme.buffer.clear();
+    return false;
+  }
+
+  char in;
+  if (sdlKeysym>='a' && sdlKeysym<='z') in=sdlKeysym-'a'+'A';
+  else if (sdlKeysym>='A' && sdlKeysym<='Z') in=sdlKeysym;
+  else if (sdlKeysym=='.') in='_';
+  else {
+    pendingPhoneme.buffer.clear();
+    return false;
+  }
+
+  if (!pendingPhoneme.buffer.empty() &&
+      (pendingPhoneme.chan!=cell.chan || pendingPhoneme.ord!=cell.ord ||
+       pendingPhoneme.row!=cell.row || pendingPhoneme.col!=cell.col)) {
+    pendingPhoneme.buffer.clear();
+  }
+
+  const String bank=e->song.systemFlags[e->song.dispatchOfChan[cell.chan]].getString("bank","ja-mokhtari-2000");
+
+  auto setPending=[&](const KlattschCell& c, const String& buf, bool canCoalesce) {
+    pendingPhoneme.chan=c.chan;
+    pendingPhoneme.ord=c.ord;
+    pendingPhoneme.row=c.row;
+    pendingPhoneme.col=c.col;
+    pendingPhoneme.canCoalesce=canCoalesce;
+    pendingPhoneme.buffer=buf;
+  };
+  auto commit=[&](const KlattschCell& target, int phonemeIndex) {
+    writeKlattschPhoneme(target,phonemeIndex,
+      !pendingPhoneme.buffer.empty() && pendingPhoneme.canCoalesce);
+    pendingPhoneme.buffer.clear();
+    curNibble=false;
+    if (!settings.effectCursorDir) {
+      editAdvance();
+    } else if (settings.effectCursorDir==2) {
+      if (++cursor.xFine>=(3+(e->curPat[target.chan].effectCols*2))) cursor.xFine=3;
+    } else {
+      if (cursor.xFine&1) cursor.xFine++;
+      else { editAdvance(); cursor.xFine--; }
+    }
+  };
+
+  String trial=pendingPhoneme.buffer;
+  trial+=in;
+  KlattschInput::MatchResult r=KlattschInput::match(bank.c_str(),trial.c_str());
+
+  if (r.kind==KlattschInput::MatchKind::Complete) {
+    commit(cell,r.phonemeIndex);
+    return true;
+  }
+  if (r.kind==KlattschInput::MatchKind::Pending || r.kind==KlattschInput::MatchKind::Ambiguous) {
+    // write an exact prefix now; a longer match can replace it.
+    bool canCoalesce=!pendingPhoneme.buffer.empty() && pendingPhoneme.canCoalesce;
+    if (r.kind==KlattschInput::MatchKind::Ambiguous) {
+      canCoalesce=writeKlattschPhoneme(cell,r.phonemeIndex,canCoalesce);
+    }
+    setPending(cell,trial,canCoalesce);
+    return true;
+  }
+
+  // commit the short match and retry this key in the next cell.
+  if (!pendingPhoneme.buffer.empty()) {
+    KlattschInput::MatchResult prior=KlattschInput::match(bank.c_str(),pendingPhoneme.buffer.c_str());
+    if (prior.kind==KlattschInput::MatchKind::Ambiguous || prior.kind==KlattschInput::MatchKind::Complete) {
+      commit(cell,prior.phonemeIndex);
+      String fresh(1,in);
+      KlattschInput::MatchResult again=KlattschInput::match(bank.c_str(),fresh.c_str());
+      KlattschCell next=klattschCellAtCursor();
+      if (next.pat!=NULL) {
+        if (again.kind==KlattschInput::MatchKind::Complete) {
+          commit(next,again.phonemeIndex);
+        } else if (again.kind==KlattschInput::MatchKind::Pending || again.kind==KlattschInput::MatchKind::Ambiguous) {
+          bool canCoalesce=false;
+          if (again.kind==KlattschInput::MatchKind::Ambiguous) {
+            canCoalesce=writeKlattschPhoneme(next,again.phonemeIndex);
+          }
+          setPending(next,fresh,canCoalesce);
+        }
+      }
+      return true;
+    }
+  }
+  pendingPhoneme.buffer.clear();
+  return true;
 }
 
 void FurnaceGUI::valueInput(int num, bool direct, int target) {
@@ -1845,8 +1996,13 @@ void FurnaceGUI::keyDown(SDL_Event& ev) {
           if (it!=valueKeys.cend()) {
             int num=it->second;
             if (num<10) {
-              alterSampleMap(2,num+60);
-              return;
+              if (e->song.ins[curIns]->type==DIV_INS_NES) {
+                alterSampleMap(2,num);
+                return;
+              } else {
+                alterSampleMap(2, num + 60);
+                return;
+              }
             }
           }
           break;
@@ -1925,10 +2081,12 @@ void FurnaceGUI::keyDown(SDL_Event& ev) {
               }
             }
           } else if (edit) { // value
-            auto it=valueKeys.find(ev.key.keysym.sym);
-            if (it!=valueKeys.cend()) {
-              int num=it->second;
-              valueInput(num);
+            if (curNibble || !tryArpabetInput(ev.key.keysym.sym)) {
+              auto it=valueKeys.find(ev.key.keysym.sym);
+              if (it!=valueKeys.cend()) {
+                int num=it->second;
+                valueInput(num);
+              }
             }
           }
         }
@@ -3037,12 +3195,20 @@ void FurnaceGUI::showWarning(String what, FurnaceGUIWarnings type) {
             if (save(curFileName,e->song.isDMF?e->song.version:0)>0) {
               showError(fmt::sprintf(_("Error while saving file! (%s)"),lastError));
             } else {
-              quit=true;
+              if (settingsOpen && settingsChanged) {
+                showWarning(_("Do you want to save your settings before quitting?"),GUI_WARN_QUIT_SETTINGS);
+              } else {
+                quit=true;
+              }
             }
           }
         }},
         {tNo,kNo,[this]{
-          quit=true;
+          if (settingsOpen && settingsChanged) {
+            showWarning(_("Do you want to save your settings before quitting?"),GUI_WARN_QUIT_SETTINGS);
+          } else {
+            quit=true;
+          }
         }},
         wCancel,
       };
@@ -3159,11 +3325,13 @@ void FurnaceGUI::showWarning(String what, FurnaceGUIWarnings type) {
     case GUI_WARN_RESET_LAYOUT:
       warnChoices={
         {tYes,kYes,[this]{
-          if (!mobileUI) {
+          if (mobileUI) {
+            ImGui::LoadIniSettingsFromMemory(defaultMobileLayout);
+          } else {
             ImGui::LoadIniSettingsFromMemory(defaultLayout);
-            if (!ImGui::SaveIniSettingsToDisk(finalLayoutPath,true)) {
-              reportError(fmt::sprintf(_("could NOT save layout! %s"),strerror(errno)));
-            }
+          }
+          if (!ImGui::SaveIniSettingsToDisk(finalLayoutPath,true)) {
+            reportError(fmt::sprintf(_("could NOT save layout! %s"),strerror(errno)));
           }
           settingsChanged=true;
         },true},
@@ -3283,6 +3451,19 @@ void FurnaceGUI::showWarning(String what, FurnaceGUIWarnings type) {
         }},
       };
       break;
+    case GUI_WARN_QUIT_SETTINGS:
+        warnChoices={
+          {tYes,kYes,[this]{
+            willCommit=true;
+            settingsChanged=false;
+            quit=true;
+          }},
+          {tNo,kNo,[this]{
+            quit=true;
+          }},
+          wCancel,
+        };
+        break;
     case GUI_WARN_GENERIC:
       warnChoices={
         {tOk,kOk,[]{}},
@@ -3909,25 +4090,34 @@ void FurnaceGUI::editOptions(bool topMenu) {
 
 void FurnaceGUI::toggleMobileUI(bool enable, bool force) {
   if (mobileUI!=enable || force) {
-    if (!mobileUI && enable) {
+    // the only moment force is true is during GUI init.
+    // don't save the layout because we still haven't loaded it.
+    if (!force) {
       if (!ImGui::SaveIniSettingsToDisk(finalLayoutPath,true)) {
         reportError(fmt::sprintf(_("could NOT save layout! %s"),strerror(errno)));
       }
     }
     mobileUI=enable;
+
     if (mobileUI) {
-      ImGui::GetIO().IniFilename=NULL;
+      strncpy(finalLayoutPath,(e->getConfigPath()+String(MOBILE_LAYOUT_INI)).c_str(),4095);
+    } else {
+      strncpy(finalLayoutPath,(e->getConfigPath()+String(LAYOUT_INI)).c_str(),4095);
+    }
+
+    ImGui::GetIO().IniFilename=NULL;
+    if (!ImGui::LoadIniSettingsFromDisk(finalLayoutPath,true)) {
+      reportError(fmt::sprintf(_("could NOT load layout! %s"),strerror(errno)));
+      ImGui::LoadIniSettingsFromMemory(mobileUI?defaultMobileLayout:defaultLayout);
+    }
+
+    if (mobileUI) {
       ImGui::GetIO().ConfigFlags|=ImGuiConfigFlags_InertialScrollEnable;
       ImGui::GetIO().ConfigFlags|=ImGuiConfigFlags_NoHoverColors;
       ImGui::GetIO().AlwaysScrollText=true;
       fileDialog->mobileUI=true;
       newFilePicker->setMobile(true);
     } else {
-      ImGui::GetIO().IniFilename=NULL;
-      if (!ImGui::LoadIniSettingsFromDisk(finalLayoutPath,true)) {
-        reportError(fmt::sprintf(_("could NOT load layout! %s"),strerror(errno)));
-        ImGui::LoadIniSettingsFromMemory(defaultLayout);
-      }
       ImGui::GetIO().ConfigFlags&=~ImGuiConfigFlags_InertialScrollEnable;
       ImGui::GetIO().ConfigFlags&=~ImGuiConfigFlags_NoHoverColors;
       ImGui::GetIO().AlwaysScrollText=false;
@@ -3979,16 +4169,27 @@ int _processEvent(void* instance, SDL_Event* event) {
 #endif
 
 int FurnaceGUI::processEvent(SDL_Event* ev) {
-  if (introPos<11.0 && !shortIntro) return 1;
 #ifdef IS_MOBILE
   if (ev->type==SDL_APP_TERMINATING) {
     // TODO: save last song state here
-    quit=true;
-  } else if (ev->type==SDL_APP_WILLENTERBACKGROUND) {
+    logD("mobile: TERMINATING");
     commitState(e->getConfObject());
+    if (userPresetsOpen) {
+      saveUserPresets(true);
+    }
+    logI("saving config.");
     e->saveConf();
+    quit=true;
+    return 0;
+  } else if (ev->type==SDL_APP_WILLENTERBACKGROUND) {
+    logD("mobile: will enter background");
+    commitState(e->getConfObject());
+    logI("saving config.");
+    e->saveConf();
+    return 0;
   }
 #endif
+  if (introPos<11.0 && !shortIntro) return 1;
   if (cvOpen) return 1;
   if (ev->type==SDL_KEYDOWN) {
     if (!ev->key.repeat && latchTarget==0 && !wantCaptureKeyboard && !sampleMapWaitingInput && (ev->key.keysym.mod&(~(VALID_MODS)))==0) {
@@ -4697,6 +4898,7 @@ bool FurnaceGUI::loop() {
           }
           break;
         case SDL_APP_TERMINATING:
+          logW("this shouldn't be happening. got SDL_APP_TERMINATING in main loop!");
           quit=true;
           break;
       }
@@ -5297,7 +5499,7 @@ bool FurnaceGUI::loop() {
             exitDisabledTimer=1;
             for (int i=0; i<e->song.systemLen; i++) {
               if (ImGui::TreeNode(fmt::sprintf("%d. %s##_SYSP%d",i+1,getSystemName(e->song.system[i]),i).c_str())) {
-                drawSysConf(i,i,e->song.system[i],e->song.systemFlags[i],true,true);
+                drawSysConf(i,i,e->song.system[i],e->song.systemFlags[i],e->song.systemChans[i],true,true);
                 ImGui::TreePop();
               }
             }
@@ -6050,7 +6252,11 @@ bool FurnaceGUI::loop() {
               if (saveWasSuccessful && postWarnAction!=GUI_WARN_GENERIC) {
                 switch (postWarnAction) {
                   case GUI_WARN_QUIT:
-                    quit=true;
+                    if (settingsOpen && settingsChanged) {
+                      showWarning(_("Do you want to save your settings before quitting?"),GUI_WARN_QUIT_SETTINGS);
+                    } else {
+                      quit=true;
+                    }
                     break;
                   case GUI_WARN_NEW:
                     displayNew=true;
@@ -7733,6 +7939,10 @@ bool FurnaceGUI::loop() {
 
     MEASURE_END(popup);
 
+    // this is here for drawImage() to work correctly
+    introMin=ImVec2(0,0);
+    introMax=ImVec2(canvasW,canvasH);
+
 #ifdef NO_INTRO
     introPos=12.0;
 #else
@@ -8074,6 +8284,8 @@ bool FurnaceGUI::loop() {
       SDL_Delay(100);
     }
   }
+
+  logD("GUI loop is over");
   return false;
 }
 
@@ -8548,7 +8760,12 @@ bool FurnaceGUI::init() {
   }
 
   logD("preparing layout...");
-  strncpy(finalLayoutPath,(e->getConfigPath()+String(LAYOUT_INI)).c_str(),4095);
+  if (mobileUI) {
+    strncpy(finalLayoutPath,(e->getConfigPath()+String(MOBILE_LAYOUT_INI)).c_str(),4095);
+  } else {
+    strncpy(finalLayoutPath,(e->getConfigPath()+String(LAYOUT_INI)).c_str(),4095);
+  }
+  logV("finalLayoutPath: %s",finalLayoutPath);
   backupPath=e->getConfigPath();
   if (backupPath.size()>0) {
     if (backupPath[backupPath.size()-1]==DIR_SEPARATOR) backupPath.resize(backupPath.size()-1);
@@ -8922,10 +9139,8 @@ void FurnaceGUI::syncState() {
 }
 
 void FurnaceGUI::commitState(DivConfig& conf) {
-  if (!mobileUI) {
-    if (!ImGui::SaveIniSettingsToDisk(finalLayoutPath,true)) {
-      reportError(fmt::sprintf(_("could NOT save layout! %s"),strerror(errno)));
-    }
+  if (!ImGui::SaveIniSettingsToDisk(finalLayoutPath,true)) {
+    reportError(fmt::sprintf(_("could NOT save layout! %s"),strerror(errno)));
   }
 
   conf.set("configVersion",(int)DIV_ENGINE_VERSION);
@@ -9191,6 +9406,8 @@ bool FurnaceGUI::finish(bool saveConfig) {
 bool FurnaceGUI::requestQuit() {
   if (modified && !cvOpen) {
     showWarning(_("Unsaved changes! Save changes before quitting?"),GUI_WARN_QUIT);
+  } else if (settingsOpen && settingsChanged) {
+    showWarning(_("Do you want to save your settings before quitting?"),GUI_WARN_QUIT_SETTINGS);
   } else {
     quit=true;
   }
@@ -9497,6 +9714,7 @@ FurnaceGUI::FurnaceGUI():
   curWindowLast(GUI_WINDOW_NOTHING),
   curWindowThreadSafe(GUI_WINDOW_NOTHING),
   failedNoteOn(false),
+  patLineHeight(24.0f),
   lastPatternWidth(0.0f),
   longThreshold(0.48f),
   buttonLongThreshold(0.20f),
@@ -9652,9 +9870,10 @@ FurnaceGUI::FurnaceGUI():
   silenceSize(1024),
   resampleTarget(32000),
   resampleStrat(5),
+  sampleFixLoopTarget(0),
   amplifyVol(100.0),
   amplifyOff(0.0),
-  noiseGateThreshold(-60.0f),
+  trimSideNoiseThreshold(-60.0f),
   sampleSelStart(-1),
   sampleSelEnd(-1),
   sampleInfo(true),
@@ -9688,7 +9907,7 @@ FurnaceGUI::FurnaceGUI():
   openSampleSilenceOpt(false),
   openSampleFilterOpt(false),
   openSampleCrossFadeOpt(false),
-  openSampleNoiseGateOpt(false),
+  openTrimSideNoiseOpt(false),
   selectedPortSet(0x1fff),
   selectedSubPort(-1),
   hoveredPortSet(0x1fff),
@@ -9813,6 +10032,8 @@ FurnaceGUI::FurnaceGUI():
   sampleCompileDispatch(0),
   sampleCompileIndex(0),
   sampleCompileSize(0),
+  lastTapTime(0),
+  grooveTargetBPM(150.0f),
   warnIsOpen(false) {
   // value keys
   valueKeys[SDLK_0]=0;
