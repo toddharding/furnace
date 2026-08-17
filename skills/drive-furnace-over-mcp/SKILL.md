@@ -5,24 +5,26 @@ description: Author, drive, inspect, and render chiptune/tracker music in Furnac
 
 # Drive Furnace over MCP
 
-Furnace (the multi-system chiptune tracker, `repos/furnace`) ships an MCP server:
-JSON-RPC 2.0 (`initialize` / `tools/list` / `tools/call`) in the same shape as the
-engine's `devkit::mcp` and the hub's MCP. One live `DivEngine` is bound; every tool
-operates on it statefully, so authoring is create → edit → listen → read back → render,
-with real audio out of a real chip emulator at every step.
+This build of Furnace (the multi-system chiptune tracker) ships an MCP server:
+JSON-RPC 2.0 (`initialize` / `tools/list` / `tools/call`). One live `DivEngine` is
+bound; every tool operates on it statefully, so authoring is create → edit → listen →
+read back → render, with real audio out of a real chip emulator at every step.
 
 ## Build & launch
 
-Build once (Windows/MinGW; the console subsystem flag matters — without it the binary
-cannot print the ready line):
+Build once, with Furnace's normal prerequisites for your platform. Two flags matter
+here: `WITH_MCP` (default ON) compiles the server in, and on Windows
+`CONSOLE_SUBSYSTEM=ON` is required — without it the binary has no stdio at all and
+cannot print the ready line.
 
 ```bash
-export PATH="/c/ProgramData/mingw64/mingw64/bin:$PATH"
-export TMPDIR="$LOCALAPPDATA/Temp" TMP="$TMPDIR" TEMP="$TMPDIR"
-cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-  -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCONSOLE_SUBSYSTEM=ON
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCONSOLE_SUBSYSTEM=ON
 ninja -C build
 ```
+
+On Windows/MinGW, put your MinGW `bin` on `PATH` and point `TMPDIR`/`TMP`/`TEMP` at a
+writable directory before configuring — GCC fails silently, mid-configure, if either is
+wrong.
 
 Launch (TCP is the primary transport; port 0 picks a free port):
 
