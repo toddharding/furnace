@@ -95,6 +95,20 @@ void DivEngine::registerROMExports() {
     false, DIV_REQPOL_LAX
   );
 
+  romExportDefs[DIV_ROM_N64M]=new DivROMExportDef(
+    "Nintendo 64 module (.n64m)", "Ultra Force",
+    "the song itself - orders, patterns, instruments and PCM - for a player\n"
+    "running on the RSP. not a register dump (the N64 has no sound registers)\n"
+    "and not a rendered stream (two minutes of stereo is a quarter of the\n"
+    "cartridge). refuses any effect the player does not implement, rather\n"
+    "than exporting a song that plays differently on the console.",
+    "Nintendo 64 module", ".n64m",
+    {
+      DIV_SYSTEM_N64
+    },
+    false, DIV_REQPOL_EXACT
+  );
+
   romExportDefs[DIV_ROM_TIUNA]=new DivROMExportDef(
     "Atari 2600 (TIunA)", "Natt Akuma",
     "advanced driver with software tuning support.\n"

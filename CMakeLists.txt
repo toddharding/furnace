@@ -918,6 +918,9 @@ src/engine/platform/powernoise.cpp
 src/engine/platform/dave.cpp
 src/engine/platform/gbadma.cpp
 src/engine/platform/gbaminmod.cpp
+  src/engine/platform/n64.cpp
+  src/engine/soundfont.cpp
+  src/engine/export/n64m.cpp
 src/engine/platform/nds.cpp
 src/engine/platform/bifurcator.cpp
 src/engine/platform/klattsch.cpp

@@ -142,7 +142,8 @@ const char* const romTargetIds[DIV_ROM_MAX]={
   "tiuna",
   "sap_r",
   "ipod",
-  "grub"
+  "grub",
+  "n64m"
 };
 
 const char* romReqPolicyName(DivROMExportReqPolicy p) {
@@ -547,7 +548,7 @@ void registerRenderTools(FurnaceMCP& m) {
     "Run a ROM/native export target (see list_rom_exports for ids and viability) and write its output to disk. "
     "Multi-output targets (multiOutput=true in list_rom_exports) treat 'path' as an existing output directory.",
     json{{"type","object"},{"properties",{
-      {"target",{{"type","string"},{"description","target id from list_rom_exports: amiga_validation, zsm, tiuna, sap_r, ipod, or grub"}}},
+      {"target",{{"type","string"},{"description","target id from list_rom_exports: amiga_validation, zsm, tiuna, sap_r, ipod, grub, or n64m"}}},
       {"path",{{"type","string"},{"description","output file path, or output directory (must already exist) for multi-output targets"}}},
       {"config",{{"type","object"},{"description",
         "target-specific config keys (string/int/float/bool values). known keys: "

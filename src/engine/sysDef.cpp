@@ -2591,6 +2591,19 @@ void DivEngine::registerSystems() {
     }
   );
   
+  /* THE NINTENDO 64 HAS NO SOUND CHIP. What a composer writes for here is
+     libdragon's software mixer on the RSP - sixteen PCM voices, each with a
+     rate, a volume and a pan, summed into a stereo bus. There is no
+     oscillator, no wavetable and no FM anywhere in the machine, so the sample
+     set IS the timbre; see src/engine/platform/n64.h for why the voice count
+     and the output rate are the two decisions that matter. */
+  sysDefs[DIV_SYSTEM_N64]=new DivSysDef(
+    _("Nintendo 64"), NULL, 0xda, 0, 16, 1, 32,
+    false, true, 0, false, (1U<<DIV_SAMPLE_DEPTH_8BIT)|(1U<<DIV_SAMPLE_DEPTH_16BIT), 0, 0,
+    _("no sound chip at all: the RSP mixes PCM voices in software and the AI plays the result. sixteen sample channels, each with its own rate, volume and pan."),
+    DivChanDefFunc(stockChanDef<DIV_CH_PCM,DIV_INS_AMIGA>)
+  );
+
   sysDefs[DIV_SYSTEM_GBA_DMA]=new DivSysDef(
     _("Game Boy Advance DMA Sound"), NULL, 0xd7, 0, 2, 2, 2,
     false, true, 0, false, 1U<<DIV_SAMPLE_DEPTH_8BIT, 0, 256,

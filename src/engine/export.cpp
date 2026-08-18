@@ -25,6 +25,7 @@
 #include "export/zsm.h"
 #include "export/ipod.h"
 #include "export/grub.h"
+#include "export/n64m.h"
 
 DivROMExport* DivEngine::buildROM(DivROMExportOptions sys) {
   DivROMExport* exporter=NULL;
@@ -46,6 +47,9 @@ DivROMExport* DivEngine::buildROM(DivROMExportOptions sys) {
       break;
     case DIV_ROM_GRUB:
       exporter=new DivExportGRUB;
+      break;
+    case DIV_ROM_N64M:
+      exporter=new DivExportN64M;
       break;
     default:
       exporter=new DivROMExport;

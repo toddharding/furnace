@@ -35,6 +35,7 @@
 
 #include "mcp.h"
 #include "tools_common.h"
+#include "../engine/soundfont.h"
 #include "../ta-log.h"
 
 #include <cmath>
@@ -861,6 +862,134 @@ void registerAssetTools(FurnaceMCP& m) {
       }
       e->notifyPitchTable();
       return json{{"index",idx},{"path",path},{"count",(int)e->song.sample.size()}};
+    }
+  ));
+
+
+  // -------------------------------------------------------------------------
+  // soundfont_presets
+  m.addTool(FurnaceMCPTool(
+    "soundfont_presets",
+    "List the presets in a SoundFont (.sf2) - bank, program, name and how many key zones each has. A sample machine like the Nintendo 64 has no oscillator, so the instrument set IS the timbre, and an .sf2 (GeneralUser GS, for instance) is where a composer gets forty usable instruments without going to find forty WAVs. 'filter' matches the name, case-insensitively.",
+    json{{"type","object"},{"properties",{
+      {"path",{{"type","string"},{"description","the .sf2 file"}}},
+      {"filter",{{"type","string"}}}
+    }},{"required",json::array({"path"})}},
+    [](FurnaceMCP& m, const json& args) -> json {
+      (void)m;
+      String path=mcpArgStr(args,"path");
+      String filter=args.contains("filter")?mcpArgStr(args,"filter"):"";
+      for (size_t i=0; i<filter.size(); i++) filter[i]=tolower(filter[i]);
+      DivSoundFont sf;
+      if (!sf.open(path.c_str())) throw std::runtime_error(sf.getError());
+      json out=json::array();
+      const std::vector<DivSoundFontPreset>& pr=sf.getPresets();
+      for (size_t i=0; i<pr.size(); i++) {
+        if (!filter.empty()) {
+          String lower=pr[i].name;
+          for (size_t k=0; k<lower.size(); k++) lower[k]=tolower(lower[k]);
+          if (lower.find(filter)==String::npos) continue;
+        }
+        out.push_back(json{
+          {"index",(int)i},
+          {"name",pr[i].name},
+          {"bank",pr[i].bank},
+          {"program",pr[i].program},
+          {"zones",pr[i].zones}
+        });
+      }
+      return json{{"soundfont",sf.getName()},{"path",path},
+                  {"total",(int)pr.size()},{"presets",out}};
+    }
+  ));
+
+  // -------------------------------------------------------------------------
+  // soundfont_import
+  m.addTool(FurnaceMCPTool(
+    "soundfont_import",
+    "Import one preset out of a SoundFont as a sample, tuned. The preset is picked by 'preset' (index from soundfont_presets) or by 'name' (first case-insensitive substring match) or by 'bank'+'program'. 'key' says WHICH RECORDING to take out of a multi-sampled instrument - a piano is eight files inside one preset, keyed by note range - and defaults to 60 (middle C). The sample arrives with its loop points and with centerRate set from the recording's root key, so it plays in tune without anybody tuning it by ear. Envelopes, filters and velocity layers are deliberately NOT imported: the target plays a sample at a rate with a volume and a pan, and importing what it cannot make would be importing a sound that is not there.",
+    json{{"type","object"},{"properties",{
+      {"path",{{"type","string"}}},
+      {"preset",{{"type","integer"}}},
+      {"name",{{"type","string"}}},
+      {"bank",{{"type","integer"}}},
+      {"program",{{"type","integer"}}},
+      {"key",{{"type","integer"},{"description","MIDI key, default 60"}}},
+      {"as",{{"type","string"},{"description","name for the sample; defaults to the preset name"}}}
+    }},{"required",json::array({"path"})}},
+    [](FurnaceMCP& m, const json& args) -> json {
+      DivEngine* e=m.engine();
+      String path=mcpArgStr(args,"path");
+      DivSoundFont sf;
+      if (!sf.open(path.c_str())) throw std::runtime_error(sf.getError());
+      const std::vector<DivSoundFontPreset>& pr=sf.getPresets();
+      int which=-1;
+      if (args.contains("preset")) {
+        which=args["preset"].get<int>();
+      } else if (args.contains("name")) {
+        String want=mcpArgStr(args,"name");
+        for (size_t i=0; i<want.size(); i++) want[i]=tolower(want[i]);
+        for (size_t i=0; i<pr.size() && which<0; i++) {
+          String lower=pr[i].name;
+          for (size_t k=0; k<lower.size(); k++) lower[k]=tolower(lower[k]);
+          if (lower.find(want)!=String::npos) which=(int)i;
+        }
+        if (which<0) throw std::runtime_error("no preset matches that name");
+      } else if (args.contains("program")) {
+        const int bank=args.contains("bank")?args["bank"].get<int>():0;
+        const int prog=args["program"].get<int>();
+        for (size_t i=0; i<pr.size() && which<0; i++) {
+          if (pr[i].bank==bank && pr[i].program==prog) which=(int)i;
+        }
+        if (which<0) throw std::runtime_error("no preset with that bank/program");
+      } else {
+        throw std::runtime_error("say which preset: preset=, name=, or bank+program=");
+      }
+      const int key=args.contains("key")?args["key"].get<int>():60;
+      DivSoundFontSample got;
+      if (!sf.loadPreset(which,key,got)) throw std::runtime_error(sf.getError());
+      if (got.data.empty()) throw std::runtime_error("that preset is an empty sample");
+
+      DivSample* s=new DivSample;
+      s->name=args.contains("as")?mcpArgStr(args,"as"):pr[which].name;
+      s->depth=DIV_SAMPLE_DEPTH_16BIT;
+      s->legacyRate=got.rate;
+      /* CENTRE RATE IS THE TUNING, and it is the whole reason to read the
+         format rather than the PCM: the recording knows which key it was
+         played at, so the rate that makes it sound at C-4 is arithmetic
+         rather than somebody dragging a slider until it sounds right. */
+      const double semis=(double)(60-got.rootKey)-(double)got.fineTune/100.0;
+      s->centerRate=(int)((double)got.rate*pow(2.0,semis/12.0));
+      if (s->centerRate<100) s->centerRate=100;
+      if (s->centerRate>384000) s->centerRate=384000;
+      if (!s->init(got.data.size())) {
+        delete s;
+        throw std::runtime_error("could not allocate the sample");
+      }
+      memcpy(s->data16,got.data.data(),got.data.size()*sizeof(short));
+      if (got.loopStart>=0 && got.loopEnd>got.loopStart) {
+        s->loop=true;
+        s->loopMode=DIV_SAMPLE_LOOP_FORWARD;
+        s->loopStart=got.loopStart;
+        s->loopEnd=got.loopEnd;
+      }
+      const int idx=e->addSamplePtr(s);
+      if (idx<0) throw std::runtime_error("could not add sample (too many samples)");
+      e->notifyPitchTable();
+      return json{
+        {"index",idx},
+        {"preset",which},
+        {"name",pr[which].name},
+        {"sample",got.name},
+        {"frames",(int)got.data.size()},
+        {"rate",(int)got.rate},
+        {"centerRate",s->centerRate},
+        {"rootKey",got.rootKey},
+        {"loop",s->loop},
+        {"loopStart",s->loopStart},
+        {"loopEnd",s->loopEnd},
+        {"soundfont",sf.getName()}
+      };
     }
   ));
 

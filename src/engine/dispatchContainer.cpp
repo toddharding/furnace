@@ -85,6 +85,7 @@
 #include "platform/c140.h"
 #include "platform/gbadma.h"
 #include "platform/gbaminmod.h"
+#include "platform/n64.h"
 #include "platform/pcmdac.h"
 #include "platform/esfm.h"
 #include "platform/powernoise.h"
@@ -720,6 +721,9 @@ void DivDispatchContainer::init(DivSystem sys, DivEngine* eng, int chanCount, do
       break;
     case DIV_SYSTEM_GBA_DMA:
       dispatch=new DivPlatformGBADMA;
+      break;
+    case DIV_SYSTEM_N64:
+      dispatch=new DivPlatformN64;
       break;
     case DIV_SYSTEM_GBA_MINMOD:
       dispatch=new DivPlatformGBAMinMod;
