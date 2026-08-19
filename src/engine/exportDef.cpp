@@ -109,6 +109,22 @@ void DivEngine::registerROMExports() {
     false, DIV_REQPOL_EXACT
   );
 
+  romExportDefs[DIV_ROM_XM]=new DivROMExportDef(
+    "FastTracker II module (.xm)", "Furnace",
+    "the song as an XM, which is a format other programs already read.\n"
+    "libdragon ships an XM player (xm64) and a converter (audioconv64), so\n"
+    "this is how a song made here reaches a Nintendo 64 game without anybody\n"
+    "writing a player. XM carries a sample per key and a volume and panning\n"
+    "envelope per instrument, so note maps and macros survive the trip.\n"
+    "refuses, by channel and row, anything XM cannot hold.",
+    "FastTracker II module", ".xm",
+    // No required chip. XM holds sampled instruments, so what decides whether a
+    // song fits is its instruments and its effects, not which chip it runs on -
+    // and the exporter says which row does not fit rather than refusing here.
+    {},
+    false, DIV_REQPOL_ANY
+  );
+
   romExportDefs[DIV_ROM_TIUNA]=new DivROMExportDef(
     "Atari 2600 (TIunA)", "Natt Akuma",
     "advanced driver with software tuning support.\n"

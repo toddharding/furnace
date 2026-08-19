@@ -143,7 +143,8 @@ const char* const romTargetIds[DIV_ROM_MAX]={
   "sap_r",
   "ipod",
   "grub",
-  "n64m"
+  "n64m",
+  "xm"
 };
 
 const char* romReqPolicyName(DivROMExportReqPolicy p) {
@@ -548,7 +549,7 @@ void registerRenderTools(FurnaceMCP& m) {
     "Run a ROM/native export target (see list_rom_exports for ids and viability) and write its output to disk. "
     "Multi-output targets (multiOutput=true in list_rom_exports) treat 'path' as an existing output directory.",
     json{{"type","object"},{"properties",{
-      {"target",{{"type","string"},{"description","target id from list_rom_exports: amiga_validation, zsm, tiuna, sap_r, ipod, grub, or n64m"}}},
+      {"target",{{"type","string"},{"description","target id from list_rom_exports: amiga_validation, zsm, tiuna, sap_r, ipod, grub, n64m, or xm"}}},
       {"path",{{"type","string"},{"description","output file path, or output directory (must already exist) for multi-output targets"}}},
       {"config",{{"type","object"},{"description",
         "target-specific config keys (string/int/float/bool values). known keys: "
@@ -601,8 +602,17 @@ void registerRenderTools(FurnaceMCP& m) {
       if (exp==NULL) throw std::runtime_error("could not create ROM exporter (buildROM returned NULL)");
       exp->setConf(conf);
       if (!exp->go(e)) {
+        // Targets that refuse a song say WHICH channel, pattern and row they
+        // refused it for, and they say it in their own log. Dropping that here
+        // leaves a caller with "it did not work" and nothing to fix.
+        String detail;
+        for (String& line: exp->exportLog) {
+          if (!detail.empty()) detail+="\n";
+          detail+=line;
+        }
         delete exp;
-        throw std::runtime_error("could not begin ROM export process");
+        if (detail.empty()) throw std::runtime_error("could not begin ROM export process");
+        throw std::runtime_error(fmt::sprintf("ROM export refused this song:\n%s",detail));
       }
       exp->wait();
       if (exp->hasFailed()) {
