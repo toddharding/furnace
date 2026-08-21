@@ -122,7 +122,18 @@ static int pointAtFrame(const std::vector<XMEnvPoint>& pts, int frame) {
 static bool mapEffect(unsigned char fx, unsigned char val,
                       unsigned char& xfx, unsigned char& xval, String& why) {
   switch (fx) {
-    case 0x00: case 0x01: case 0x02: case 0x03: case 0x04: case 0x07:
+    case 0x00:
+      // ARPEGGIO RUNS THE OTHER WAY ROUND. Furnace's three stages are the
+      // note, the note plus the HIGH nibble, then the note plus the low one
+      // (playback.cpp: `arp>>4` on stage 1, `arp&15` on stage 2). XM's are
+      // the note, the LOW nibble, then the high one - libxm, which is what
+      // libdragon's player is, takes `param & 0x0F` on tick 1 and
+      // `param >> 4` on tick 2. So the nibbles swap, exactly as this repo's
+      // own XM importer already swaps them on the way in.
+      xfx=fx;
+      xval=(unsigned char)((val>>4)|(val<<4));
+      return true;
+    case 0x01: case 0x02: case 0x03: case 0x04: case 0x07:
     case 0x0a: case 0x0b:
       xfx=fx;
       xval=val;
@@ -322,6 +333,41 @@ bool DivExportXM::go(DivEngine* e) {
     orderOut[o]=(unsigned char)found;
   }
 
+  /* TRAILING EMPTY CHANNELS ARE DROPPED. A chip has as many channels as it has
+     and a song usually plays fewer, but an XM channel is not free downstream:
+     libdragon's player takes one mixer channel for each one the file declares,
+     and carries five bytes a row for it whether or not anything is in it. So a
+     16-channel chip playing three parts becomes a three-channel module.
+
+     Only the TAIL is trimmed, never a gap in the middle: a channel's position
+     is part of how a module sounds, and closing a gap would move every part to
+     the right of it. */
+  int lastUsed=-1;
+  for (int c=0; c<chans; c++) {
+    bool any=false;
+    for (size_t p=0; p<combos.size() && !any; p++) {
+      DivPattern* pat=sub->pat[c].getPattern(combos[p][c],false);
+      for (int r=0; r<rows && !any; r++) {
+        // An empty cell is -1 in every column: DivPattern::clear memsets the
+        // whole thing to -1, so "not zero" would call every channel used.
+        if (pat->newData[r][DIV_PAT_NOTE]>=0 ||
+            pat->newData[r][DIV_PAT_INS]>=0 ||
+            pat->newData[r][DIV_PAT_VOL]>=0) {
+          any=true;
+        }
+        for (int fxi=0; fxi<sub->pat[c].effectCols && !any; fxi++) {
+          if (pat->newData[r][DIV_PAT_FX(fxi)]>=0) any=true;
+        }
+      }
+    }
+    if (any) lastUsed=c;
+  }
+  const int outChans=(lastUsed>=0)?(lastUsed+1):1;
+  if (outChans<chans) {
+    logAppendf("NOTE: channels %d to %d are empty - exporting %d of %d",
+               outChans+1,chans,outChans,chans);
+  }
+
   bool insUsed[256];
   memset(insUsed,0,sizeof(insUsed));
   bool warnedNoteOff=false;
@@ -331,7 +377,7 @@ bool DivExportXM::go(DivEngine* e) {
   for (size_t p=0; p<combos.size(); p++) {
     std::vector<unsigned char> bytes;
     for (int r=0; r<rows; r++) {
-      for (int c=0; c<chans; c++) {
+      for (int c=0; c<outChans; c++) {
         DivPattern* pat=sub->pat[c].getPattern(combos[p][c],false);
         const short note=pat->newData[r][DIV_PAT_NOTE];
         const short ins=pat->newData[r][DIV_PAT_INS];
@@ -582,7 +628,7 @@ bool DivExportXM::go(DivEngine* e) {
   w->writeI(276);                                    // header size, itself included
   w->writeS((short)orderLen);
   w->writeS(0);                                      // restart position
-  w->writeS((short)chans);
+  w->writeS((short)outChans);
   w->writeS((short)combos.size());
   w->writeS((short)insCount);
   w->writeS((e->song.compatFlags.linearPitch!=0)?1:0);
@@ -729,7 +775,7 @@ bool DivExportXM::go(DivEngine* e) {
   const String outName=e->song.name.empty()?String("song"):e->song.name;
   output.push_back(DivROMExportOutput(outName+".xm",w));
   logAppendf("wrote %d channels, %d patterns, %d instruments",
-             chans,(int)combos.size(),insCount);
+             outChans,(int)combos.size(),insCount);
   return true;
 }
 
